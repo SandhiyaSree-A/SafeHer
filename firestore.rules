@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "security_room_admin";
+    }
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /emergency_contacts/{contactId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    match /sos_alerts/{alertId} {
+      // Regular user creates alert with own userId
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+
+      // Regular user reads own alert; Admin reads all alerts
+      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Regular user can resolve own alert; Admin can acknowledge or resolve any alert
+      allow update: if request.auth != null && (
+        (resource.data.userId == request.auth.uid && request.resource.data.status == "resolved") ||
+        isAdmin()
+      );
+    }
+
+    match /journeys/{journeyId} {
+      allow create, read, update: if request.auth != null && (
+        request.resource.data.userId == request.auth.uid ||
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        isAdmin()
+      );
+    }
+  }
+}
