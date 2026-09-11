@@ -1,8 +1,30 @@
-/build/
-/app/build/
+# Python virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment variables / secrets
+.env
+
+# Android / Gradle build files
+**/build/
 .gradle/
-.idea/
-.kotlin/
+
+# Android local configuration
 local.properties
-*.iml
+
+# Android Studio / IntelliJ
+.idea/
+
+# NASA downloaded data files
+lighting_backend/data/nasa/*.h5
+
+# VS Code
+.vscode/
+
+# OS files
 .DS_Store
+Thumbs.db
