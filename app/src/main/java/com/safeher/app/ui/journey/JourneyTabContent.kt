@@ -1,11 +1,12 @@
 package com.safeher.app.ui.journey
+import com.safeher.app.data.model.LocationData
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -32,11 +33,22 @@ import com.safeher.app.ui.sos.SosViewModel
 @Composable
 fun JourneyTabContent(
     user: User,
+    currentLocation: LocationData?,
     viewModel: JourneyViewModel = viewModel(),
     sosViewModel: SosViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    LaunchedEffect(currentLocation) {
+
+    currentLocation?.let { location ->
+
+        viewModel.updateCurrentLocation(
+            location.lat,
+            location.lng
+        )
+    }
+}
     var searchInput by remember { mutableStateOf(uiState.searchQuery) }
 
     val originLatLng = remember(uiState.originLat, uiState.originLng) {
@@ -265,14 +277,17 @@ fun JourneyTabContent(
                 }
 
                 // Route Polylines
-                uiState.routes.forEach { route ->
+                uiState.routes.forEachIndexed { index, route ->
                     val isSelected = (route.routeId == uiState.selectedRoute?.routeId)
                     val points = route.points.map { LatLng(it.lat, it.lng) }
 
-                    val polylineColor = when {
-                        route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
-                        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
-                        else -> Color(0xFFC62828)
+                    val polylineColor = when (index) {
+
+                        0 -> Color(0xFF2E7D32) // Green
+
+                        1 -> Color(0xFFF57F17) // Yellow
+
+                        else -> Color(0xFFC62828) // Red
                     }
 
                     Polyline(
@@ -349,9 +364,10 @@ fun JourneyTabContent(
                                 .heightIn(max = 160.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(uiState.routes) { route ->
+                            itemsIndexed(uiState.routes) { index, route ->
                                 RouteCardItem(
                                     route = route,
+                                    index= index,
                                     isSelected = (route.routeId == uiState.selectedRoute?.routeId),
                                     onSelect = { viewModel.selectRoute(route) }
                                 )
@@ -398,12 +414,16 @@ fun JourneyTabContent(
 @Composable
 fun RouteCardItem(
     route: RouteOption,
+    index: int,
     isSelected: Boolean,
     onSelect: () -> Unit
 ) {
-    val badgeColor = when {
-        route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
-        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
+    val badgeColor = when (index) {
+
+        0 -> Color(0xFF2E7D32)
+
+        1 -> Color(0xFFF57F17)
+
         else -> Color(0xFFC62828)
     }
 

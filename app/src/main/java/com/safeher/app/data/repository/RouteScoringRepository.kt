@@ -25,144 +25,205 @@ class RouteScoringRepository {
     suspend fun scoreRoutes(
         originLat: Double,
         originLng: Double,
-        destLat: Double,
-        destLng: Double
-    ): Result<List<RouteOption>> = withContext(Dispatchers.IO) {
+        destinationQuery: String
+): Result<List<RouteOption>> =
+    withContext(Dispatchers.IO) {
+
         try {
-            // Try connecting to Python Cloud Function endpoint on local emulator / server
-            val endpointUrl = "http://10.0.2.2:5000/scoreRoute"
+
+            // STEP 1: Convert destination name to coordinates
+            val destination =
+                geocodeDestination(destinationQuery)
+
+            val destLat = destination.first
+            val destLng = destination.second
+
+            // Android Emulator → PC localhost
+            val endpointUrl =
+                "http://10.0.2.2:8000/analyze-route"
+
             val url = URL(endpointUrl)
-            val conn = url.openConnection() as HttpURLConnection
+
+            val conn =
+                url.openConnection() as HttpURLConnection
+
             conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
+
             conn.doOutput = true
 
-            val body = JSONObject().apply {
-                put("originLat", originLat)
-                put("originLng", originLng)
-                put("destLat", destLat)
-                put("destLng", destLng)
+            conn.setRequestProperty(
+                "Content-Type",
+                "application/json"
+            )
+
+            conn.connectTimeout = 15000
+            conn.readTimeout = 60000
+
+            val requestJson = JSONObject().apply {
+
+                put("source_lat", originLat)
+
+                put("source_lon", originLng)
+
+                put("destination_lat", destLat)
+
+                put("destination_lon", destLng)
             }
 
-            conn.outputStream.use { os ->
-                os.write(body.toString().toByteArray())
+            conn.outputStream.use { output ->
+
+                output.write(
+                    requestJson
+                        .toString()
+                        .toByteArray()
+                )
             }
 
-            if (conn.responseCode == 200) {
-                val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(responseText)
-                val routesArray = json.getJSONArray("routes")
-                val routes = mutableListOf<RouteOption>()
+            val responseCode = conn.responseCode
 
-                for (i in 0 until routesArray.length()) {
-                    val r = routesArray.getJSONObject(i)
-                    val pointsArray = r.getJSONArray("points")
-                    val pts = mutableListOf<RoutePoint>()
-                    for (j in 0 until pointsArray.length()) {
-                        val pt = pointsArray.getJSONObject(j)
-                        pts.add(RoutePoint(pt.getDouble("lat"), pt.getDouble("lng")))
-                    }
+            if (responseCode != HttpURLConnection.HTTP_OK) {
 
-                    routes.add(
-                        RouteOption(
-                            routeId = r.getString("routeId"),
-                            name = r.getString("name"),
-                            distance = r.getString("distance"),
-                            duration = r.getString("duration"),
-                            compositeScore = r.getDouble("compositeScore"),
-                            modelRiskLabel = r.getString("modelRiskLabel"),
-                            displayRisk = r.getString("displayRisk"),
-                            lightingScore = r.getDouble("lightingScore"),
-                            crowdDensity = r.getString("crowdDensity"),
-                            disclaimer = r.optString("disclaimer", disclaimerText),
-                            points = pts
+                val errorText =
+                    conn.errorStream
+                        ?.bufferedReader()
+                        ?.use { it.readText() }
+
+                throw Exception(
+                    "Backend error $responseCode: $errorText"
+                )
+            }
+
+            val responseText =
+                conn.inputStream
+                    .bufferedReader()
+                    .use { it.readText() }
+
+            val json = JSONObject(responseText)
+
+            if (json.getString("status") != "success") {
+                throw Exception("Route analysis failed")
+            }
+
+            val safestRoute =
+                json.getJSONObject("safest_route")
+
+            val safestRouteId =
+                safestRoute.getInt("route_id")
+
+            val routesArray =
+                json.getJSONArray("all_routes")
+
+            val routes =
+                mutableListOf<RouteOption>()
+
+            for (i in 0 until routesArray.length()) {
+
+                val route =
+                    routesArray.getJSONObject(i)
+
+                val routeId =
+                    route.getInt("route_id")
+
+                val coordinates =
+                    route.getJSONArray("coordinates")
+
+                val points =
+                    mutableListOf<RoutePoint>()
+
+                for (j in 0 until coordinates.length()) {
+
+                    val point =
+                        coordinates.getJSONObject(j)
+
+                    points.add(
+
+                        RoutePoint(
+                            lat = point.getDouble("latitude"),
+                            lng = point.getDouble("longitude")
                         )
                     )
                 }
-                return@withContext Result.success(routes)
-            } else {
-                // Fallback to local model calculation if backend HTTP status != 200
-                Result.success(calculateFallbackRoutes(originLat, originLng, destLat, destLng))
+
+                val lightingSafetyScore =
+                    route.getDouble("lighting_safety_score")
+
+                val averageLightScore =
+                    route.getDouble("average_light_score")
+
+                val compositeScore =
+                    lightingSafetyScore / 100.0
+
+                val displayRisk =
+                    when {
+
+                        lightingSafetyScore >= 75 ->
+                            "Low Risk (Safest)"
+
+                        lightingSafetyScore >= 50 ->
+                            "Medium Risk"
+
+                        else ->
+                            "High Risk"
+                    }
+
+                routes.add(
+
+                    RouteOption(
+
+                        routeId = "route_$routeId",
+
+                        name =
+                            if (routeId == safestRouteId)
+                                "SafeHer Recommended Route"
+                            else
+                                "Alternative Route $routeId",
+
+                        distance =
+                            "${route.getDouble("distance_km")} km",
+
+                        duration =
+                            "${route.getDouble("duration_minutes").toInt()} mins",
+
+                        compositeScore = compositeScore,
+
+                        modelRiskLabel =
+                            when {
+
+                                lightingSafetyScore >= 75 -> "low"
+
+                                lightingSafetyScore >= 50 -> "medium"
+
+                                else -> "high"
+                            },
+
+                        displayRisk = displayRisk,
+
+                        lightingScore =
+                            averageLightScore / 100.0,
+
+                        crowdDensity = "unknown",
+
+                        points = points
+                    )
+                )
             }
+
+            Result.success(
+                routes.sortedByDescending {
+                    it.compositeScore
+                }
+            )
+
         } catch (e: Exception) {
-            // Fallback gracefully on network error or offline mode
-            Result.success(calculateFallbackRoutes(originLat, originLng, destLat, destLng))
+
+            Result.failure(e)
         }
     }
 
     /**
      * Local resilient scoring fallback matching Part A model logic
      */
-    private fun calculateFallbackRoutes(
-        originLat: Double,
-        originLng: Double,
-        destLat: Double,
-        destLng: Double
-    ): List<RouteOption> {
-        val dLat = destLat - originLat
-        val dLng = destLng - originLng
-
-        // 3 alternate route polylines
-        val r1 = RouteOption(
-            routeId = "route_1",
-            name = "Via Main Arterial Road (High Lighting)",
-            distance = "4.8 km",
-            duration = "12 mins",
-            compositeScore = 0.85,
-            modelRiskLabel = "low",
-            displayRisk = "Low Risk (Safest)",
-            lightingScore = 0.90,
-            crowdDensity = "high",
-            disclaimer = disclaimerText,
-            points = listOf(
-                RoutePoint(originLat, originLng),
-                RoutePoint(originLat + dLat * 0.3, originLng + dLng * 0.2),
-                RoutePoint(originLat + dLat * 0.7, originLng + dLng * 0.8),
-                RoutePoint(destLat, destLng)
-            )
-        )
-
-        val r2 = RouteOption(
-            routeId = "route_2",
-            name = "Via Central Park Avenue",
-            distance = "5.5 km",
-            duration = "15 mins",
-            compositeScore = 0.62,
-            modelRiskLabel = "medium",
-            displayRisk = "Medium Risk",
-            lightingScore = 0.65,
-            crowdDensity = "medium",
-            disclaimer = disclaimerText,
-            points = listOf(
-                RoutePoint(originLat, originLng),
-                RoutePoint(originLat + dLat * 0.25, originLng + dLng * 0.45),
-                RoutePoint(originLat + dLat * 0.75, originLng + dLng * 0.55),
-                RoutePoint(destLat, destLng)
-            )
-        )
-
-        val r3 = RouteOption(
-            routeId = "route_3",
-            name = "Via Service Bypass (Secondary Alley)",
-            distance = "6.2 km",
-            duration = "19 mins",
-            compositeScore = 0.38,
-            modelRiskLabel = "high",
-            displayRisk = "High Risk",
-            lightingScore = 0.35,
-            crowdDensity = "low",
-            disclaimer = disclaimerText,
-            points = listOf(
-                RoutePoint(originLat, originLng),
-                RoutePoint(originLat + dLat * 0.4, originLng - dLng * 0.2),
-                RoutePoint(originLat + dLat * 0.85, originLng + dLng * 0.3),
-                RoutePoint(destLat, destLng)
-            )
-        )
-
-        return listOf(r1, r2, r3).sortedByDescending { it.compositeScore }
+    
     }
 
     /**
@@ -317,5 +378,44 @@ class RouteScoringRepository {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+    private fun geocodeDestination(query: String): Pair<Double, Double> {
+
+        val encodedQuery =
+            java.net.URLEncoder.encode(query, "UTF-8")
+
+        val endpointUrl =
+            "http://10.0.2.2:8000/geocode?query=$encodedQuery"
+
+        val url = URL(endpointUrl)
+
+        val conn =
+            url.openConnection() as HttpURLConnection
+
+        conn.requestMethod = "GET"
+
+        conn.connectTimeout = 10000
+        conn.readTimeout = 15000
+
+        val responseCode = conn.responseCode
+
+        if (responseCode != HttpURLConnection.HTTP_OK) {
+            throw Exception("Destination not found")
+        }
+
+        val responseText =
+            conn.inputStream
+                .bufferedReader()
+                .use { it.readText() }
+
+        val json = JSONObject(responseText)
+
+        val latitude =
+            json.getDouble("latitude")
+
+        val longitude =
+            json.getDouble("longitude")
+
+        return Pair(latitude, longitude)
     }
 }

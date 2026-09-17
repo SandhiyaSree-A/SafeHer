@@ -26,7 +26,7 @@ def get_routes(
     params = {
         "overview": "full",
         "geometries": "geojson",
-        "alternatives": "true",
+        "alternatives": "3",
         "steps": "false"
     }
 

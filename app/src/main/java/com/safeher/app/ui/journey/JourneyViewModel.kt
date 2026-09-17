@@ -16,10 +16,10 @@ import kotlinx.coroutines.launch
 
 data class JourneyUiState(
     val searchQuery: String = "",
-    val originLat: Double = 28.6139,
-    val originLng: Double = 77.2090,
-    val destLat: Double = 28.5355,
-    val destLng: Double = 77.3910,
+    val originLat: Double = 0.0,
+    val originLng: Double = 0.0,
+    val destLat: Double = 0.0,
+    val destLng: Double = 0.0,
     val destinationAddress: String = "",
     val routes: List<RouteOption> = emptyList(),
     val selectedRoute: RouteOption? = null,
@@ -72,10 +72,7 @@ class JourneyViewModel(
                 ) 
             }
 
-            val destLat = _uiState.value.originLat + 0.05 + (targetQuery.hashCode() % 100) * 0.0005
-            val destLng = _uiState.value.originLng + 0.07 + (targetQuery.hashCode() % 100) * 0.0004
-
-            _uiState.update { it.copy(destLat = destLat, destLng = destLng) }
+            
 
             val result = repository.scoreRoutes(
                 originLat = _uiState.value.originLat,
