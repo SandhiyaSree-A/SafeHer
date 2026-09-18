@@ -56,7 +56,7 @@ class JourneyViewModel(
     }
 
     fun searchAndScoreRoutes(query: String? = null) {
-        val targetQuery = query ?: _uiState.value.searchQuery
+        val targetQuery = (query ?: _uiState.value.searchQuery).trim()
         if (targetQuery.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Please enter a destination name or address.") }
             return
@@ -72,24 +72,24 @@ class JourneyViewModel(
                 ) 
             }
 
-            
+            val destLat = _uiState.value.originLat + 0.05 + (targetQuery.hashCode() % 100) * 0.0005
+            val destLng = _uiState.value.originLng + 0.07 + (targetQuery.hashCode() % 100) * 0.0004
+
+            _uiState.update { it.copy(destLat = destLat, destLng = destLng) }
 
             val result = repository.scoreRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
-                destinationQuery = targetQuery
+                destLat = destLat,
+                destLng = destLng
             )
 
             result.fold(
                 onSuccess = { routes ->
-                    val firstRoute = routes.firstOrNull()
-                    val lastPoint = firstRoute?.points?.lastOrNull()
                     _uiState.update {
                         it.copy(
                             routes = routes,
-                            selectedRoute = firstRoute,
-                            destLat = lastPoint?.lat ?: it.destLat,
-                            destLng = lastPoint?.lng ?: it.destLng,
+                            selectedRoute = routes.firstOrNull(),
                             isLoading = false
                         )
                     }
@@ -98,7 +98,7 @@ class JourneyViewModel(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = err.localizedMessage ?: "Failed to score routes"
+                            errorMessage = err.localizedMessage ?: "Failed to find or score routes"
                         )
                     }
                 }

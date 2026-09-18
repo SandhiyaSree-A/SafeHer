@@ -60,26 +60,11 @@ fun JourneyTabContent(
         position = CameraPosition.fromLatLngZoom(originLatLng, 13f)
     }
 
-    // Auto center map camera to fit full route polylines when destination or routes change
-    LaunchedEffect(uiState.destLat, uiState.destLng, uiState.routes) {
-        if (uiState.destLat != 0.0 && uiState.destLng != 0.0) {
-            val selected = uiState.selectedRoute ?: uiState.routes.firstOrNull()
-            if (selected != null && selected.points.isNotEmpty()) {
-                val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
-                selected.points.forEach { builder.include(LatLng(it.lat, it.lng)) }
-                if (uiState.originLat != 0.0 && uiState.originLat != selected.points.first().lat) {
-                    builder.include(LatLng(uiState.originLat, uiState.originLng))
-                }
-                val bounds = builder.build()
-                try {
-                    cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 100))
-                } catch (e: Exception) {
-                    cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 13.5f)
-                }
-            } else {
-                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 14f))
-            }
-        }
+    // Auto center map camera when destination or origin changes
+    LaunchedEffect(uiState.destLat, uiState.destLng) {
+        val centerLat = (uiState.originLat + uiState.destLat) / 2.0
+        val centerLng = (uiState.originLng + uiState.destLng) / 2.0
+        cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(centerLat, centerLng), 12.5f)
     }
 
     // Modal Deviation Warning Popup Dialog
@@ -309,16 +294,16 @@ fun JourneyTabContent(
                     val isSelected = (route.routeId == uiState.selectedRoute?.routeId)
                     val points = route.points.map { LatLng(it.lat, it.lng) }
 
-                    val polylineColor = when (index) {
-                        0 -> Color(0xFF00E676) // Bright Vibrant Emerald Green for Safest
-                        1 -> Color(0xFFFFB300) // Amber Yellow for Moderate
-                        else -> Color(0xFFFF5252) // Red for High Risk
+                    val polylineColor = when {
+                        route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
+                        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
+                        else -> Color(0xFFC62828)
                     }
 
                     Polyline(
                         points = points,
-                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.4f),
-                        width = if (isSelected) 16f else 9f,
+                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.5f),
+                        width = if (isSelected) 14f else 8f,
                         onClick = { if (!uiState.isJourneyActive) viewModel.selectRoute(route) }
                     )
                 }
@@ -443,9 +428,9 @@ fun RouteCardItem(
     isSelected: Boolean,
     onSelect: () -> Unit
 ) {
-    val badgeColor = when (index) {
-        0 -> Color(0xFF2E7D32)
-        1 -> Color(0xFFF57F17)
+    val badgeColor = when {
+        route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
+        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
         else -> Color(0xFFC62828)
     }
 
