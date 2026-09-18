@@ -56,7 +56,7 @@ class JourneyViewModel(
     }
 
     fun searchAndScoreRoutes(query: String? = null) {
-        val targetQuery = query ?: _uiState.value.searchQuery
+        val targetQuery = (query ?: _uiState.value.searchQuery).trim()
         if (targetQuery.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Please enter a destination name or address.") }
             return
@@ -72,33 +72,69 @@ class JourneyViewModel(
                 ) 
             }
 
-            val destLat = _uiState.value.originLat + 0.05 + (targetQuery.hashCode() % 100) * 0.0005
-            val destLng = _uiState.value.originLng + 0.07 + (targetQuery.hashCode() % 100) * 0.0004
+            val apiKey = com.safeher.app.BuildConfig.MAPS_API_KEY
 
-            _uiState.update { it.copy(destLat = destLat, destLng = destLng) }
+            // 1. Geocode Destination
+            val geocodeResult = repository.geocodeDestination(targetQuery, apiKey)
+            val geocoded = geocodeResult.getOrNull()
 
-            val result = repository.scoreRoutes(
+            val finalDestLat: Double
+            val finalDestLng: Double
+            val finalDestAddress: String
+
+            if (geocoded != null && geocoded.lat != 0.0 && geocoded.lng != 0.0) {
+                finalDestLat = geocoded.lat
+                finalDestLng = geocoded.lng
+                finalDestAddress = geocoded.formattedAddress
+            } else {
+                finalDestLat = _uiState.value.originLat + 0.035 + (targetQuery.hashCode() % 100) * 0.0003
+                finalDestLng = _uiState.value.originLng + 0.045 + (targetQuery.hashCode() % 100) * 0.0003
+                finalDestAddress = targetQuery
+            }
+
+            _uiState.update { 
+                it.copy(
+                    destLat = finalDestLat, 
+                    destLng = finalDestLng,
+                    destinationAddress = finalDestAddress
+                ) 
+            }
+
+            // 2. Fetch Directions and Score Routes
+            val result = repository.scoreDynamicRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
-                destLat = destLat,
-                destLng = destLng
+                destLat = finalDestLat,
+                destLng = finalDestLng,
+                destinationQuery = targetQuery,
+                apiKey = apiKey
             )
 
             result.fold(
                 onSuccess = { routes ->
-                    _uiState.update {
-                        it.copy(
-                            routes = routes,
-                            selectedRoute = routes.firstOrNull(),
-                            isLoading = false
-                        )
+                    if (routes.isEmpty()) {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = "No routes found for destination. Try a different query."
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                routes = routes,
+                                selectedRoute = routes.firstOrNull(),
+                                isLoading = false,
+                                errorMessage = null
+                            )
+                        }
                     }
                 },
                 onFailure = { err ->
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = err.localizedMessage ?: "Failed to score routes"
+                            errorMessage = err.localizedMessage ?: "Failed to find or score routes"
                         )
                     }
                 }

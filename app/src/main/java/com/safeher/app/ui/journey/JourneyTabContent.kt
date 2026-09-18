@@ -47,11 +47,37 @@ fun JourneyTabContent(
         position = CameraPosition.fromLatLngZoom(originLatLng, 13f)
     }
 
-    // Auto center map camera when destination or origin changes
-    LaunchedEffect(uiState.destLat, uiState.destLng) {
-        val centerLat = (uiState.originLat + uiState.destLat) / 2.0
-        val centerLng = (uiState.originLng + uiState.destLng) / 2.0
-        cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(centerLat, centerLng), 12.5f)
+    // Bind live location updates to journey origin
+    LaunchedEffect(Unit) {
+        try {
+            val locationRepo = com.safeher.app.data.repository.LocationRepository(context)
+            locationRepo.getLocationUpdates().collect { loc ->
+                if (loc.lat != 0.0 && loc.lng != 0.0) {
+                    viewModel.updateCurrentLocation(loc.lat, loc.lng)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    // Auto fit camera to route LatLngBounds when routes or destination changes
+    LaunchedEffect(uiState.routes, uiState.selectedRoute, uiState.destLat, uiState.destLng) {
+        if (uiState.routes.isNotEmpty()) {
+            try {
+                val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
+                builder.include(originLatLng)
+                builder.include(LatLng(uiState.destLat, uiState.destLng))
+                val targetRoute = uiState.selectedRoute ?: uiState.routes.firstOrNull()
+                targetRoute?.points?.forEach { pt ->
+                    builder.include(LatLng(pt.lat, pt.lng))
+                }
+                val bounds = builder.build()
+                cameraPositionState.animate(com.google.android.gms.maps.CameraUpdateFactory.newLatLngBounds(bounds, 120))
+            } catch (_: Exception) {
+                val centerLat = (uiState.originLat + uiState.destLat) / 2.0
+                val centerLng = (uiState.originLng + uiState.destLng) / 2.0
+                cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(centerLat, centerLng), 12.5f)
+            }
+        }
     }
 
     // Modal Deviation Warning Popup Dialog
@@ -271,14 +297,16 @@ fun JourneyTabContent(
 
                     val polylineColor = when {
                         route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
-                        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
+                        route.compositeScore >= 0.40 -> Color(0xFFF57F17)
                         else -> Color(0xFFC62828)
                     }
 
                     Polyline(
                         points = points,
-                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.5f),
-                        width = if (isSelected) 14f else 8f,
+                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.45f),
+                        width = if (isSelected) 16f else 8f,
+                        zIndex = if (isSelected) 2f else 1f,
+                        clickable = true,
                         onClick = { if (!uiState.isJourneyActive) viewModel.selectRoute(route) }
                     )
                 }
@@ -403,7 +431,7 @@ fun RouteCardItem(
 ) {
     val badgeColor = when {
         route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
-        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
+        route.compositeScore >= 0.40 -> Color(0xFFF57F17)
         else -> Color(0xFFC62828)
     }
 

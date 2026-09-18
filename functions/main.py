@@ -152,6 +152,74 @@ def score_route_segments(origin_lat, origin_lng, dest_lat, dest_lng):
     scored_routes.sort(key=lambda x: x["compositeScore"], reverse=True)
     return scored_routes
 
+def score_custom_routes(routes_input):
+    """
+    Scores dynamic route objects provided by the client with actual decoded polylines.
+    """
+    model_dict = load_model()
+    pipeline = model_dict['pipeline']
+
+    scored_routes = []
+    for idx, r in enumerate(routes_input):
+        route_id = r.get("routeId", f"route_{idx + 1}")
+        name = r.get("name", f"Route {idx + 1}")
+        distance = r.get("distance", "N/A")
+        duration = r.get("duration", "N/A")
+        
+        raw_pts = r.get("points", [])
+        path = []
+        for p in raw_pts:
+            if isinstance(p, dict):
+                path.append([float(p.get("lat", 0.0)), float(p.get("lng", 0.0))])
+            elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                path.append([float(p[0]), float(p[1])])
+
+        if not path:
+            continue
+
+        mock_lighting = float(r.get("mock_lighting", 0.70))
+        mock_crowd = str(r.get("mock_crowd", "medium"))
+        crowd_num_map = {"high": 0.90, "medium": 0.50, "low": 0.25}
+        mock_crowd_num = float(r.get("mock_crowd_num", crowd_num_map.get(mock_crowd.lower(), 0.50)))
+
+        df_features = build_feature_dataframe(path, mock_lighting=mock_lighting, mock_crowd=mock_crowd)
+        pred_label = pipeline.predict(df_features)[0].lower()
+
+        if pred_label == 'low':
+            model_risk_score = 1.0
+        elif pred_label == 'medium':
+            model_risk_score = 0.5
+        else:
+            model_risk_score = 0.0
+
+        w1, w2, w3 = 0.50, 0.30, 0.20
+        composite_score = round(w1 * model_risk_score + w2 * mock_lighting + w3 * mock_crowd_num, 2)
+
+        if composite_score >= 0.70:
+            display_risk = "Low Risk (Safest)"
+        elif composite_score >= 0.45:
+            display_risk = "Medium Risk"
+        else:
+            display_risk = "High Risk"
+
+        scored_routes.append({
+            "routeId": route_id,
+            "name": name,
+            "distance": distance,
+            "duration": duration,
+            "compositeScore": composite_score,
+            "modelRiskLabel": pred_label,
+            "modelRiskScore": model_risk_score,
+            "displayRisk": display_risk,
+            "lightingScore": mock_lighting,
+            "crowdDensity": mock_crowd,
+            "disclaimer": MANDATORY_DISCLAIMER,
+            "points": [{"lat": p[0], "lng": p[1]} for p in path]
+        })
+
+    scored_routes.sort(key=lambda x: x["compositeScore"], reverse=True)
+    return scored_routes
+
 # Flask app runner for local dev and Cloud Function entrypoint
 app = Flask(__name__)
 
@@ -161,18 +229,21 @@ def score_route_http():
         return jsonify({}), 200
 
     req_json = request.get_json(silent=True) or request.args
-    origin_lat = float(req_json.get('originLat', 28.6139)) # Default Delhi coordinates for demo
-    origin_lng = float(req_json.get('originLng', 77.2090))
-    dest_lat = float(req_json.get('destLat', 28.5355))
-    dest_lng = float(req_json.get('destLng', 77.3910))
+    req_routes = req_json.get('routes') if isinstance(req_json, dict) else None
 
     try:
-        routes = score_route_segments(origin_lat, origin_lng, dest_lat, dest_lng)
+        if req_routes and isinstance(req_routes, list) and len(req_routes) > 0:
+            routes = score_custom_routes(req_routes)
+        else:
+            origin_lat = float(req_json.get('originLat', 28.6139))
+            origin_lng = float(req_json.get('originLng', 77.2090))
+            dest_lat = float(req_json.get('destLat', 28.5355))
+            dest_lng = float(req_json.get('destLng', 77.3910))
+            routes = score_route_segments(origin_lat, origin_lng, dest_lat, dest_lng)
+
         return jsonify({
             "status": "success",
             "disclaimer": MANDATORY_DISCLAIMER,
-            "origin": {"lat": origin_lat, "lng": origin_lng},
-            "destination": {"lat": dest_lat, "lng": dest_lng},
             "routes": routes
         })
     except Exception as e:
