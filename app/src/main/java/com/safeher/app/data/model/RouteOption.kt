@@ -19,6 +19,9 @@ data class RouteOption(
     val displayRisk: String = "",
     val lightingScore: Double = 0.0,
     val crowdDensity: String = "",
+    val trafficCondition: String = "Smooth",
+    val trafficScore: Double = 0.85,
+    val darkSpots: List<RoutePoint> = emptyList(),
     val disclaimer: String = "Risk-awareness estimate for prototype/demo purposes only, not a guarantee of real-world safety or crime prediction",
     val points: List<RoutePoint> = emptyList()
 )

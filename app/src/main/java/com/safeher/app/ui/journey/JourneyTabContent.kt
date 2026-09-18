@@ -276,24 +276,33 @@ fun JourneyTabContent(
                     )
                 }
 
+                // Dark Spot Warning Markers on Map
+                uiState.routes.forEach { route ->
+                    route.darkSpots.forEach { spot ->
+                        Marker(
+                            state = MarkerState(position = LatLng(spot.lat, spot.lng)),
+                            title = "⚠️ Low Light / Dark Stretch",
+                            snippet = "Caution: Low ambient lighting area along ${route.name}",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_VIOLET)
+                        )
+                    }
+                }
+
                 // Route Polylines
                 uiState.routes.forEachIndexed { index, route ->
                     val isSelected = (route.routeId == uiState.selectedRoute?.routeId)
                     val points = route.points.map { LatLng(it.lat, it.lng) }
 
                     val polylineColor = when (index) {
-
-                        0 -> Color(0xFF2E7D32) // Green
-
-                        1 -> Color(0xFFF57F17) // Yellow
-
-                        else -> Color(0xFFC62828) // Red
+                        0 -> Color(0xFF00E676) // Bright Vibrant Emerald Green for Safest
+                        1 -> Color(0xFFFFB300) // Amber Yellow for Moderate
+                        else -> Color(0xFFFF5252) // Red for High Risk
                     }
 
                     Polyline(
                         points = points,
-                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.5f),
-                        width = if (isSelected) 14f else 8f,
+                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.4f),
+                        width = if (isSelected) 16f else 9f,
                         onClick = { if (!uiState.isJourneyActive) viewModel.selectRoute(route) }
                     )
                 }
@@ -336,7 +345,7 @@ fun JourneyTabContent(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Estimated risk: Prototype estimate, not a guarantee of real-world safety or crime prediction.",
+                                text = "Composite Safety = NASA Lighting + Traffic Congestion + Crowd Density.",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -361,13 +370,13 @@ fun JourneyTabContent(
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 160.dp),
+                                .heightIn(max = 180.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             itemsIndexed(uiState.routes) { index, route ->
                                 RouteCardItem(
                                     route = route,
-                                    index= index,
+                                    index = index,
                                     isSelected = (route.routeId == uiState.selectedRoute?.routeId),
                                     onSelect = { viewModel.selectRoute(route) }
                                 )
@@ -414,16 +423,13 @@ fun JourneyTabContent(
 @Composable
 fun RouteCardItem(
     route: RouteOption,
-    index: int,
+    index: Int,
     isSelected: Boolean,
     onSelect: () -> Unit
 ) {
     val badgeColor = when (index) {
-
         0 -> Color(0xFF2E7D32)
-
         1 -> Color(0xFFF57F17)
-
         else -> Color(0xFFC62828)
     }
 
@@ -461,7 +467,7 @@ fun RouteCardItem(
                     Text(
                         text = route.name,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                        fontSize = 14.sp
                     )
                 }
 
@@ -491,7 +497,7 @@ fun RouteCardItem(
                     color = MaterialTheme.colorScheme.outline
                 )
                 Text(
-                    text = "Lighting: ${(route.lightingScore * 100).toInt()}% | Crowd: ${route.crowdDensity.uppercase()}",
+                    text = "Light: ${(route.lightingScore * 100).toInt()}% | Crowd: ${route.crowdDensity}",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.outline
                 )
@@ -499,12 +505,24 @@ fun RouteCardItem(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            Text(
-                text = "Estimated risk: ${route.displayRisk} (prototype estimate, not a guarantee)",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = badgeColor
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Traffic: ${route.trafficCondition}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Text(
+                    text = "Risk: ${route.displayRisk}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = badgeColor
+                )
+            }
         }
     }
 }

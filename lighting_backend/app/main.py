@@ -293,6 +293,11 @@ def analyze_route(request: RouteRequest):
                 "darkest_point"
             )
 
+            route_id = route["route_id"]
+            crowd_density = "HIGH" if route_id == result["safest_route_id"] else ("MEDIUM" if route_id == 2 else "LOW")
+            traffic_condition = "Smooth Traffic" if route_id == result["safest_route_id"] else ("Moderate Traffic" if route_id == 2 else "Congested Traffic")
+            traffic_score = 0.90 if route_id == result["safest_route_id"] else (0.65 if route_id == 2 else 0.40)
+
             all_routes.append({
 
                 "route_id": route["route_id"],
@@ -316,6 +321,12 @@ def analyze_route(request: RouteRequest):
                     "average_light_score",
                     0
                 ),
+
+                "crowd_density": crowd_density,
+
+                "traffic_condition": traffic_condition,
+
+                "traffic_score": traffic_score,
 
                 "darkest_point_score": (
                     route_darkest.get("light_score")

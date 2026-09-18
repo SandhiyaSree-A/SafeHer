@@ -77,16 +77,19 @@ class JourneyViewModel(
             val result = repository.scoreRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
-                destLat = destLat,
-                destLng = destLng
+                destinationQuery = targetQuery
             )
 
             result.fold(
                 onSuccess = { routes ->
+                    val firstRoute = routes.firstOrNull()
+                    val lastPoint = firstRoute?.points?.lastOrNull()
                     _uiState.update {
                         it.copy(
                             routes = routes,
-                            selectedRoute = routes.firstOrNull(),
+                            selectedRoute = firstRoute,
+                            destLat = lastPoint?.lat ?: it.destLat,
+                            destLng = lastPoint?.lng ?: it.destLng,
                             isLoading = false
                         )
                     }

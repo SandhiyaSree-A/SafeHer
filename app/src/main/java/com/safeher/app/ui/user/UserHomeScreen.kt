@@ -92,7 +92,6 @@ fun UserHomeScreen(
                 // Persistent Active Alert Banner (shown across all tabs when SOS is active)
                 ActiveAlertBanner(
                     user = user,
-                    currentLocation = currentLocation,
                     viewModel = sosViewModel
                 )
                 offlineSosMessage?.let { message ->
@@ -116,6 +115,7 @@ fun UserHomeScreen(
                         UserHomeTab.JOURNEY -> {
                             JourneyTabContent(
                                 user = user,
+                                currentLocation = currentLocation,
                                 sosViewModel = sosViewModel
                             )
                         }
