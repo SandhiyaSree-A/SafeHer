@@ -61,12 +61,20 @@ fun JourneyTabContent(
         position = CameraPosition.fromLatLngZoom(originLatLng, 13f)
     }
 
+<<<<<<< HEAD
     // Auto center & zoom map camera to fit real route polyline bounds
+=======
+    // Auto center map camera to fit full route polylines when destination or routes change
+>>>>>>> aaeacb0 (map updation, route breakage)
     LaunchedEffect(uiState.destLat, uiState.destLng, uiState.routes) {
         if (uiState.destLat != 0.0 && uiState.destLng != 0.0) {
             val selected = uiState.selectedRoute ?: uiState.routes.firstOrNull()
             if (selected != null && selected.points.isNotEmpty()) {
+<<<<<<< HEAD
                 val builder = LatLngBounds.builder()
+=======
+                val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
+>>>>>>> aaeacb0 (map updation, route breakage)
                 selected.points.forEach { builder.include(LatLng(it.lat, it.lng)) }
                 if (uiState.originLat != 0.0 && uiState.originLat != selected.points.first().lat) {
                     builder.include(LatLng(uiState.originLat, uiState.originLng))
@@ -81,6 +89,7 @@ fun JourneyTabContent(
                 cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 14f))
             }
         }
+<<<<<<< HEAD
     }
 
     // Bind live location updates to journey origin
@@ -107,12 +116,11 @@ fun JourneyTabContent(
                     builder.include(LatLng(pt.lat, pt.lng))
                 }
                 val bounds = builder.build()
-                cameraPositionState.animate(com.google.android.gms.maps.CameraUpdateFactory.newLatLngBounds(bounds, 120))
+                cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 120))
             } catch (_: Exception) {
                 val centerLat = (uiState.originLat + uiState.destLat) / 2.0
                 val centerLng = (uiState.originLng + uiState.destLng) / 2.0
                 cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(centerLat, centerLng), 12.5f)
->>>>>>> 6b07bc7773d28b0fc43d4ccbaa9182e6fd33395f
             }
         }
     }
@@ -642,6 +650,15 @@ fun RouteCardItem(
                     color = MaterialTheme.colorScheme.tertiary
                 )
             }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = "Risk Level: ${route.displayRisk}",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = badgeColor
+            )
         }
     }
 }
