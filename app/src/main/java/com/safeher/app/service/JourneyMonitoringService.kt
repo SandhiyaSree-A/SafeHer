@@ -7,9 +7,13 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.telephony.SmsManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
@@ -17,11 +21,13 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.maps.android.PolyUtil
 import com.safeher.app.MainActivity
+import com.safeher.app.data.model.EmergencyContact
 import com.safeher.app.data.model.Journey
 import com.safeher.app.data.offline.OfflineSyncRepository
-import com.safeher.app.data.model.RoutePoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
+import java.net.URL
+import org.json.JSONObject
 
 class JourneyMonitoringService : Service() {
 
@@ -35,8 +41,16 @@ class JourneyMonitoringService : Service() {
     private var currentUserId: String? = null
     private var routePoints: List<LatLng> = emptyList()
 
+    private var lastLocationPing: LatLng? = null
+    private var lastMovementTimestamp: Long = System.currentTimeMillis()
+    private var networkLossTimestamp: Long? = null
+
     private var offPathStartTimestamp: Long? = null
     private var isDeviationAlertTriggered: Boolean = false
+    private var isEmergencySnapshotSent: Boolean = false
+
+    private lateinit var connectivityManager: ConnectivityManager
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     companion object {
         const val ACTION_START_MONITORING = "com.safeher.app.action.START_JOURNEY_MONITORING"
@@ -49,15 +63,18 @@ class JourneyMonitoringService : Service() {
         const val NOTIFICATION_ID = 2001
         const val DEVIATION_NOTIFICATION_ID = 2002
 
-        // Continuous off-path threshold: 2 minutes (120,000 ms)
-        const val OFF_PATH_THRESHOLD_MS = 120_000L
-        const val POLLING_INTERVAL_MS = 15_000L // 15 seconds
+        const val OFF_PATH_THRESHOLD_MS = 120_000L      // 2 minutes off-path
+        const val INACTIVITY_THRESHOLD_MS = 300_000L    // 5 minutes movement inactivity
+        const val NETWORK_LOSS_THRESHOLD_MS = 180_000L  // 3 minutes network loss
+        const val POLLING_INTERVAL_MS = 15_000L         // 15 seconds location ping
     }
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         createNotificationChannels()
+        registerNetworkWatchdog()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -96,8 +113,8 @@ class JourneyMonitoringService : Service() {
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SafeHer: Journey Active")
-            .setContentText("Monitoring your route & safety in real time...")
+            .setContentTitle("SafeHer: Real-Time Journey Monitoring")
+            .setContentText("Watchdog active for Network Loss, Inactivity & Safety Deviations...")
             .setSmallIcon(android.R.drawable.ic_dialog_map)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -118,7 +135,7 @@ class JourneyMonitoringService : Service() {
                     val journey = doc.toObject(Journey::class.java)
                     if (journey != null) {
                         routePoints = journey.polylinePoints.map { LatLng(it.lat, it.lng) }
-                        Log.d("JourneyService", "Loaded ${routePoints.size} route polyline points for journey $journeyId")
+                        Log.d("JourneyService", "Loaded ${routePoints.size} polyline points for journey $journeyId")
                     }
                 }
             } catch (e: Exception) {
@@ -159,43 +176,145 @@ class JourneyMonitoringService : Service() {
         val currentLatLng = LatLng(lat, lng)
         val timestamp = System.currentTimeMillis()
 
+        // 1. Inactivity Watchdog Check (track movement delta)
+        val prevLoc = lastLocationPing
+        if (prevLoc != null) {
+            val deltaMeters = FloatArray(1)
+            android.location.Location.distanceBetween(prevLoc.latitude, prevLoc.longitude, lat, lng, deltaMeters)
+            if (deltaMeters[0] > 15.0) {
+                lastMovementTimestamp = timestamp // User is moving
+            }
+        } else {
+            lastMovementTimestamp = timestamp
+        }
+        lastLocationPing = currentLatLng
+
+        val inactiveDuration = timestamp - lastMovementTimestamp
+        if (inactiveDuration >= INACTIVITY_THRESHOLD_MS && !isEmergencySnapshotSent) {
+            triggerEmergencySnapshotAlert("Inactivity Watchdog: User stopped moving for > 5 mins")
+        }
+
+        // 2. Off-Path Deviation Check
         serviceScope.launch {
             try {
-                // Location, journey ping, and user location share one offline transaction shape.
                 currentUserId?.let { uid -> offlineSync.writeLocationPing(uid, journeyId, lat, lng, timestamp) }
 
-                // 2. Check route deviation via PolyUtil (150m tolerance, geodesic=true)
                 if (routePoints.isNotEmpty()) {
                     val isOnPath = PolyUtil.isLocationOnPath(currentLatLng, routePoints, true, 150.0)
 
                     if (isOnPath) {
-                        // User is on path -> reset timer
                         offPathStartTimestamp = null
                         if (isDeviationAlertTriggered) {
                             isDeviationAlertTriggered = false
                             offlineSync.writeJourneyUpdate(journeyId, mapOf("isDeviated" to false, "deviationAlertActive" to false), "deviation_flag")
                         }
                     } else {
-                        // User is OFF path
                         if (offPathStartTimestamp == null) {
                             offPathStartTimestamp = timestamp
                         }
                         val durationOffPath = timestamp - (offPathStartTimestamp ?: timestamp)
-                        Log.w("JourneyService", "Off path for ${durationOffPath / 1000}s (threshold 120s)")
-
                         offlineSync.writeJourneyUpdate(journeyId, mapOf("isDeviated" to true), "deviation_flag")
 
                         if (durationOffPath >= OFF_PATH_THRESHOLD_MS && !isDeviationAlertTriggered) {
                             isDeviationAlertTriggered = true
-                            // Set alert active flag in Firestore so Android UI triggers popup dialog
                             offlineSync.writeJourneyUpdate(journeyId, mapOf("deviationAlertActive" to true), "deviation_flag")
                             showDeviationNotification()
+                            triggerEmergencySnapshotAlert("Route Deviation Watchdog: Off-path for > 2 mins")
                         }
                     }
                 }
             } catch (e: Exception) {
                 Log.e("JourneyService", "Error processing location update: ${e.message}")
             }
+        }
+    }
+
+    private fun registerNetworkWatchdog() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onLost(network: Network) {
+                    super.onLost(network)
+                    networkLossTimestamp = System.currentTimeMillis()
+                    Log.w("JourneyService", "Network connection lost during active journey")
+
+                    serviceScope.launch {
+                        delay(NETWORK_LOSS_THRESHOLD_MS)
+                        if (networkLossTimestamp != null && !isEmergencySnapshotSent) {
+                            val lossDuration = System.currentTimeMillis() - (networkLossTimestamp ?: System.currentTimeMillis())
+                            if (lossDuration >= NETWORK_LOSS_THRESHOLD_MS) {
+                                triggerEmergencySnapshotAlert("Network Loss Watchdog: Connection lost for > 3 mins")
+                            }
+                        }
+                    }
+                }
+
+                override fun onAvailable(network: Network) {
+                    super.onAvailable(network)
+                    networkLossTimestamp = null
+                    Log.i("JourneyService", "Network connection restored")
+                }
+            }
+            try {
+                connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
+            } catch (e: Exception) {
+                Log.e("JourneyService", "Error registering network callback: ${e.message}")
+            }
+        }
+    }
+
+    private fun triggerEmergencySnapshotAlert(reason: String) {
+        if (isEmergencySnapshotSent) return
+        isEmergencySnapshotSent = true
+
+        serviceScope.launch {
+            val uid = currentUserId ?: return@launch
+            val loc = lastLocationPing ?: return@launch
+
+            val addressName = reverseGeocodeAddress(loc.latitude, loc.longitude)
+            val mapsLink = "https://maps.google.com/?q=${loc.latitude},${loc.longitude}"
+
+            val smsMessage = "[SafeHer Emergency Snapshot]\nALERT: $reason\nLast Location: $addressName\nMap: $mapsLink\nTime: ${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}"
+
+            try {
+                // Fetch emergency contacts from Firestore
+                val snapshot = firestore.collection("users").document(uid).collection("emergency_contacts").get().await()
+                val contacts = snapshot.toObjects(EmergencyContact::class.java)
+
+                val smsManager: SmsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    applicationContext.getSystemService(SmsManager::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    SmsManager.getDefault()
+                }
+
+                for (contact in contacts) {
+                    if (contact.phone.isNotBlank()) {
+                        smsManager.sendTextMessage(contact.phone, null, smsMessage, null, null)
+                        Log.i("JourneyService", "Dispatched Emergency Snapshot SMS to ${contact.name} (${contact.phone})")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("JourneyService", "Error sending emergency snapshot SMS: ${e.message}")
+            }
+        }
+    }
+
+    private fun reverseGeocodeAddress(lat: Double, lng: Double): String {
+        return try {
+            val url = URL("https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lng&format=jsonv2")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "SafeHer-App/1.0")
+            conn.connectTimeout = 4000
+            conn.readTimeout = 4000
+            if (conn.responseCode == 200) {
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                json.optString("display_name", "Lat $lat, Lng $lng")
+            } else {
+                "Lat $lat, Lng $lng"
+            }
+        } catch (e: Exception) {
+            "Lat $lat, Lng $lng"
         }
     }
 
@@ -247,6 +366,13 @@ class JourneyMonitoringService : Service() {
     }
 
     private fun stopMonitoringService() {
+        networkCallback?.let {
+            try {
+                connectivityManager.unregisterNetworkCallback(it)
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
         if (::fusedLocationClient.isInitialized && ::locationCallback.isInitialized) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }

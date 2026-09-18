@@ -7,6 +7,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.safeher.app.data.model.Journey
 import com.safeher.app.data.model.RouteOption
+import com.safeher.app.data.model.RouteTurnStep
 import com.safeher.app.data.repository.RouteScoringRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,8 +22,10 @@ data class JourneyUiState(
     val destLat: Double = 0.0,
     val destLng: Double = 0.0,
     val destinationAddress: String = "",
+    val selectedTransportMode: String = "driving", // "driving", "walking", "bicycling"
     val routes: List<RouteOption> = emptyList(),
     val selectedRoute: RouteOption? = null,
+    val currentTurnStep: RouteTurnStep? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val isJourneySaved: Boolean = false,
@@ -55,6 +58,14 @@ class JourneyViewModel(
         _uiState.update { it.copy(searchQuery = query) }
     }
 
+    fun setTransportMode(mode: String) {
+        if (_uiState.value.selectedTransportMode == mode) return
+        _uiState.update { it.copy(selectedTransportMode = mode) }
+        if (_uiState.value.searchQuery.isNotBlank()) {
+            searchAndScoreRoutes()
+        }
+    }
+
     fun searchAndScoreRoutes(query: String? = null) {
         val targetQuery = (query ?: _uiState.value.searchQuery).trim()
         if (targetQuery.isBlank()) {
@@ -72,24 +83,26 @@ class JourneyViewModel(
                 ) 
             }
 
-            val destLat = _uiState.value.originLat + 0.05 + (targetQuery.hashCode() % 100) * 0.0005
-            val destLng = _uiState.value.originLng + 0.07 + (targetQuery.hashCode() % 100) * 0.0004
-
-            _uiState.update { it.copy(destLat = destLat, destLng = destLng) }
-
             val result = repository.scoreRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
-                destLat = destLat,
-                destLng = destLng
+                destinationQuery = targetQuery,
+                mode = _uiState.value.selectedTransportMode
             )
 
             result.fold(
                 onSuccess = { routes ->
+                    val firstRoute = routes.firstOrNull()
+                    val lastPoint = firstRoute?.points?.lastOrNull()
+                    val firstTurn = firstRoute?.turnSteps?.firstOrNull()
+
                     _uiState.update {
                         it.copy(
                             routes = routes,
-                            selectedRoute = routes.firstOrNull(),
+                            selectedRoute = firstRoute,
+                            currentTurnStep = firstTurn,
+                            destLat = lastPoint?.lat ?: it.destLat,
+                            destLng = lastPoint?.lng ?: it.destLng,
                             isLoading = false
                         )
                     }
@@ -98,7 +111,7 @@ class JourneyViewModel(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = err.localizedMessage ?: "Failed to find or score routes"
+                            errorMessage = err.localizedMessage ?: "Failed to retrieve real-time routes"
                         )
                     }
                 }
@@ -107,7 +120,8 @@ class JourneyViewModel(
     }
 
     fun selectRoute(route: RouteOption) {
-        _uiState.update { it.copy(selectedRoute = route) }
+        val firstStep = route.turnSteps.firstOrNull()
+        _uiState.update { it.copy(selectedRoute = route, currentTurnStep = firstStep) }
     }
 
     fun saveSelectedJourney(userId: String) {

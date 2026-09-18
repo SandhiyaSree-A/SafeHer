@@ -1,6 +1,7 @@
 package com.safeher.app.ui.journey
-import com.safeher.app.data.model.LocationData
 
+import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,8 +26,11 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.*
+import com.safeher.app.data.model.LocationData
 import com.safeher.app.data.model.RouteOption
+import com.safeher.app.data.model.SafetiPinMetrics
 import com.safeher.app.data.model.User
 import com.safeher.app.ui.sos.SosViewModel
 
@@ -34,22 +38,19 @@ import com.safeher.app.ui.sos.SosViewModel
 @Composable
 fun JourneyTabContent(
     user: User,
-    currentLocation: LocationData?,
+    currentLocation: LocationData? = null,
     viewModel: JourneyViewModel = viewModel(),
     sosViewModel: SosViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+
     LaunchedEffect(currentLocation) {
-
-    currentLocation?.let { location ->
-
-        viewModel.updateCurrentLocation(
-            location.lat,
-            location.lng
-        )
+        currentLocation?.let { location ->
+            viewModel.updateCurrentLocation(location.lat, location.lng)
+        }
     }
-}
+
     var searchInput by remember { mutableStateOf(uiState.searchQuery) }
 
     val originLatLng = remember(uiState.originLat, uiState.originLng) {
@@ -60,11 +61,26 @@ fun JourneyTabContent(
         position = CameraPosition.fromLatLngZoom(originLatLng, 13f)
     }
 
-    // Auto center map camera when destination or origin changes
-    LaunchedEffect(uiState.destLat, uiState.destLng) {
-        val centerLat = (uiState.originLat + uiState.destLat) / 2.0
-        val centerLng = (uiState.originLng + uiState.destLng) / 2.0
-        cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(centerLat, centerLng), 12.5f)
+    // Auto center & zoom map camera to fit real route polyline bounds
+    LaunchedEffect(uiState.destLat, uiState.destLng, uiState.routes) {
+        if (uiState.destLat != 0.0 && uiState.destLng != 0.0) {
+            val selected = uiState.selectedRoute ?: uiState.routes.firstOrNull()
+            if (selected != null && selected.points.isNotEmpty()) {
+                val builder = LatLngBounds.builder()
+                selected.points.forEach { builder.include(LatLng(it.lat, it.lng)) }
+                if (uiState.originLat != 0.0 && uiState.originLat != selected.points.first().lat) {
+                    builder.include(LatLng(uiState.originLat, uiState.originLng))
+                }
+                val bounds = builder.build()
+                try {
+                    cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 100))
+                } catch (e: Exception) {
+                    cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 13.5f)
+                }
+            } else {
+                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 14f))
+            }
+        }
     }
 
     // Modal Deviation Warning Popup Dialog
@@ -81,13 +97,13 @@ fun JourneyTabContent(
     Column(modifier = Modifier.fillMaxSize()) {
 
         if (uiState.isJourneyActive) {
-            // ACTIVE JOURNEY HEADER BANNER
+            // ACTIVE JOURNEY HEADER BANNER WITH TURN-BY-TURN GUIDANCE
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = Color(0xFF1B5E20),
                 shadowElevation = 6.dp
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -97,10 +113,10 @@ fun JourneyTabContent(
                             Icon(Icons.Default.Navigation, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Active Journey Monitoring",
+                                text = "Live Journey Monitoring",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                fontSize = 17.sp
                             )
                         }
 
@@ -118,15 +134,41 @@ fun JourneyTabContent(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    // Turn-by-Turn Maneuver Instruction
+                    uiState.currentTurnStep?.let { step ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = Color.White.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.TurnRight, contentDescription = null, tint = Color.Yellow)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = step.instruction.ifBlank { "Proceed along route" },
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = "Road: ${step.roadName}",
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Destination: ${uiState.activeJourney?.destinationAddress ?: uiState.destinationAddress}",
                         color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 13.sp
-                    )
-                    Text(
-                        text = "Safety Score: ${uiState.activeJourney?.routeScore ?: 0.85} • Polling live every 15s",
-                        color = Color.White.copy(alpha = 0.8f),
                         fontSize = 12.sp
                     )
 
@@ -153,27 +195,21 @@ fun JourneyTabContent(
                 }
             }
         } else {
-            // TOP SEARCH HEADER (PLANNED JOURNEY MODE)
+            // TOP SEARCH HEADER & TRANSPORT MODE SELECTOR
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shadowElevation = 4.dp
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "Plan Safe Journey",
-                        fontSize = 20.sp,
+                        text = "Plan Real-Time Safe Journey",
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Origin: Current Location",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.outline
-                    )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -199,6 +235,36 @@ fun JourneyTabContent(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Transport Mode Selector Chips (Drive, Walk, Bike)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TransportModeChip(
+                            label = "Car 🚗",
+                            modeKey = "driving",
+                            isSelected = (uiState.selectedTransportMode == "driving"),
+                            onClick = { viewModel.setTransportMode("driving") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        TransportModeChip(
+                            label = "Walk 🚶",
+                            modeKey = "walking",
+                            isSelected = (uiState.selectedTransportMode == "walking"),
+                            onClick = { viewModel.setTransportMode("walking") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        TransportModeChip(
+                            label = "Bike 🚲",
+                            modeKey = "bicycling",
+                            isSelected = (uiState.selectedTransportMode == "bicycling"),
+                            onClick = { viewModel.setTransportMode("bicycling") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
                     if (uiState.errorMessage != null) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
@@ -206,29 +272,6 @@ fun JourneyTabContent(
                             color = MaterialTheme.colorScheme.error,
                             fontSize = 13.sp
                         )
-                    }
-
-                    if (uiState.isJourneySaved) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            color = Color(0xFFE8F5E9),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Journey saved to Firestore! Ready to start monitoring.",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1B5E20)
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -238,7 +281,7 @@ fun JourneyTabContent(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1.1f)
+                .weight(1.0f)
         ) {
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
@@ -248,12 +291,12 @@ fun JourneyTabContent(
                 // Origin Marker
                 Marker(
                     state = MarkerState(position = originLatLng),
-                    title = "Origin (You)",
+                    title = "Origin Location",
                     snippet = "Start Location",
                     icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
                 )
 
-                // Current Live Ping Marker (when active)
+                // Live Active Location Pin
                 if (uiState.isJourneyActive && uiState.currentPingLat != 0.0) {
                     val currentPingLatLng = LatLng(uiState.currentPingLat, uiState.currentPingLng)
                     Marker(
@@ -282,8 +325,8 @@ fun JourneyTabContent(
                     route.darkSpots.forEach { spot ->
                         Marker(
                             state = MarkerState(position = LatLng(spot.lat, spot.lng)),
-                            title = "⚠️ Low Light / Dark Stretch",
-                            snippet = "Caution: Low ambient lighting area along ${route.name}",
+                            title = "⚠️ Low Light Hazard",
+                            snippet = "Caution: Low ambient lighting along ${route.name}",
                             icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_VIOLET)
                         )
                     }
@@ -294,16 +337,16 @@ fun JourneyTabContent(
                     val isSelected = (route.routeId == uiState.selectedRoute?.routeId)
                     val points = route.points.map { LatLng(it.lat, it.lng) }
 
-                    val polylineColor = when {
-                        route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
-                        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
-                        else -> Color(0xFFC62828)
+                    val polylineColor = when (index) {
+                        0 -> Color(0xFF00E676) // Vibrant Emerald Green for Safest
+                        1 -> Color(0xFFFFB300) // Amber Yellow
+                        else -> Color(0xFFFF5252) // Crimson Red
                     }
 
                     Polyline(
                         points = points,
-                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.5f),
-                        width = if (isSelected) 14f else 8f,
+                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.4f),
+                        width = if (isSelected) 16f else 9f,
                         onClick = { if (!uiState.isJourneyActive) viewModel.selectRoute(route) }
                     )
                 }
@@ -316,7 +359,7 @@ fun JourneyTabContent(
             }
         }
 
-        // BOTTOM ROUTE SELECTION AND START JOURNEY ACTIONS (PLANNED MODE ONLY)
+        // BOTTOM ROUTE SELECTION & SAFETIPIN METRICS (PLANNED MODE ONLY)
         if (!uiState.isJourneyActive) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -324,35 +367,6 @@ fun JourneyTabContent(
                 shadowElevation = 8.dp
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-
-                    // Mandatory Ethical Disclaimer Notice Banner
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Disclaimer",
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Composite Safety = NASA Lighting + Traffic Congestion + Crowd Density.",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
-                    }
 
                     if (uiState.routes.isEmpty()) {
                         Box(
@@ -362,16 +376,16 @@ fun JourneyTabContent(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Search a destination above to evaluate route safety scores.",
+                                text = "Search a destination above for real-time safe route navigation.",
                                 color = MaterialTheme.colorScheme.outline,
-                                fontSize = 14.sp
+                                fontSize = 13.sp
                             )
                         }
                     } else {
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 180.dp),
+                                .heightIn(max = 220.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             itemsIndexed(uiState.routes) { index, route ->
@@ -384,7 +398,7 @@ fun JourneyTabContent(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         if (!uiState.isJourneySaved) {
                             Button(
@@ -408,7 +422,7 @@ fun JourneyTabContent(
                                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Start Active Journey Monitoring",
+                                    text = "Start Active Navigation",
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -422,15 +436,40 @@ fun JourneyTabContent(
 }
 
 @Composable
+fun TransportModeChip(
+    label: String,
+    modeKey: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.height(36.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
 fun RouteCardItem(
     route: RouteOption,
     index: Int,
     isSelected: Boolean,
     onSelect: () -> Unit
 ) {
-    val badgeColor = when {
-        route.compositeScore >= 0.70 -> Color(0xFF2E7D32)
-        route.compositeScore >= 0.45 -> Color(0xFFF57F17)
+    val badgeColor = when (index) {
+        0 -> Color(0xFF2E7D32)
+        1 -> Color(0xFFF57F17)
         else -> Color(0xFFC62828)
     }
 
@@ -528,6 +567,26 @@ fun RouteCardItem(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // SafetiPin Audit Breakdown Meter
+            val safeti = route.safetiPinMetrics
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(6.dp),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    Text("💡 Light: ${(safeti.lightingRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("👁️ Eyes: ${(safeti.eyesOnStreetRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("👮 Patrol: ${(safeti.patrolProximityRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("🚌 Transit: ${(safeti.transitAccessRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -546,15 +605,6 @@ fun RouteCardItem(
                     color = MaterialTheme.colorScheme.tertiary
                 )
             }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            Text(
-                text = "Risk Level: ${route.displayRisk}",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = badgeColor
-            )
         }
     }
 }
