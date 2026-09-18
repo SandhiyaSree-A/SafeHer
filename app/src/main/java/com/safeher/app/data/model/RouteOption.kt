@@ -12,6 +12,8 @@ data class RoutePoint(
 data class RouteOption(
     val routeId: String = "",
     val name: String = "",
+    val viaRoute: String = "",
+    val majorAreasCovered: String = "",
     val distance: String = "",
     val duration: String = "",
     val compositeScore: Double = 0.0,

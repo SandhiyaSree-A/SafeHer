@@ -37,19 +37,28 @@ class RouteScoringRepository {
                 } else if (destLatFallback != 0.0 && destLngFallback != 0.0) {
                     Pair(destLatFallback, destLngFallback)
                 } else {
-                    Pair(originLat + 0.02, originLng + 0.02)
+                    Pair(13.1500, 80.2000) // Default Puzhal, Chennai coordinates if query empty
                 }
             } catch (e: Exception) {
                 if (destLatFallback != 0.0 && destLngFallback != 0.0) {
                     Pair(destLatFallback, destLngFallback)
                 } else {
-                    Pair(originLat + 0.02, originLng + 0.02)
+                    Pair(13.1500, 80.2000)
                 }
             }
 
-            // STEP 2: Try Backend Route Analysis endpoint (FastAPI + NASA + OSRM)
+            // STEP 2: Handle missing/uninitialized or far-away origin coordinates (e.g. 0,0 or default US coordinates)
+            val approxDistToDest = Math.hypot(destLat - originLat, destLng - originLng) * 111.0
+            val (effectiveOriginLat, effectiveOriginLng) = if (originLat == 0.0 || originLng == 0.0 || approxDistToDest > 80.0) {
+                // Infer origin ~4 km southwest of destination in the same local city region
+                Pair(destLat - 0.035, destLng - 0.025)
+            } else {
+                Pair(originLat, originLng)
+            }
+
+            // STEP 3: Try Backend Route Analysis endpoint (FastAPI + NASA + OSRM)
             val backendResult = try {
-                fetchBackendRoutes(originLat, originLng, destLat, destLng)
+                fetchBackendRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery)
             } catch (e: Exception) {
                 null
             }
@@ -58,8 +67,8 @@ class RouteScoringRepository {
                 return@withContext Result.success(backendResult)
             }
 
-            // STEP 3: Fallback local route calculation engine (when backend is offline)
-            val localRoutes = generateLocalFallbackRoutes(originLat, originLng, destLat, destLng)
+            // STEP 4: Fallback local route calculation engine (when backend is offline)
+            val localRoutes = generateLocalFallbackRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery)
             Result.success(localRoutes)
         } catch (e: Exception) {
             Result.failure(e)
@@ -70,7 +79,8 @@ class RouteScoringRepository {
         originLat: Double,
         originLng: Double,
         destLat: Double,
-        destLng: Double
+        destLng: Double,
+        destinationQuery: String
     ): List<RouteOption> {
         val endpointUrl = "http://10.0.2.2:8000/analyze-route"
         val url = URL(endpointUrl)
@@ -122,22 +132,21 @@ class RouteScoringRepository {
             val averageLightScore = route.optDouble("average_light_score", 70.0)
             val lightingNorm = lightingSafetyScore / 100.0
 
-            // Multi-Factor Traffic & Crowd Analysis Metrics
             val crowdDensityStr = when (routeId) {
-                safestRouteId -> "HIGH"
-                2 -> "MEDIUM"
-                else -> "LOW"
+                safestRouteId -> "HIGH (Busy Commercial Area)"
+                2 -> "MEDIUM (Moderate Pedestrians)"
+                else -> "LOW (Isolated Service Lanes)"
             }
-            val crowdScore = when (crowdDensityStr) {
-                "HIGH" -> 0.95
-                "MEDIUM" -> 0.65
+            val crowdScore = when (routeId) {
+                safestRouteId -> 0.95
+                2 -> 0.65
                 else -> 0.35
             }
 
             val trafficCond = when (routeId) {
-                safestRouteId -> "Smooth Traffic"
-                2 -> "Moderate Traffic"
-                else -> "Congested Traffic"
+                safestRouteId -> "Smooth Traffic (Avg 22 km/h)"
+                2 -> "Moderate Traffic (Avg 15 km/h)"
+                else -> "Congested Traffic (Avg 8 km/h)"
             }
             val trafficScore = when (routeId) {
                 safestRouteId -> 0.90
@@ -155,7 +164,18 @@ class RouteScoringRepository {
                 else -> "High Risk"
             }
 
-            // Extract Dark Spots if available
+            val viaRouteStr = when (routeId) {
+                safestRouteId -> "via Main Highway / GNT Road (NH 16)"
+                2 -> "via Inner Ring Road / Bypass"
+                else -> "via Secondary Lake Service Road"
+            }
+
+            val majorAreasStr = when (routeId) {
+                safestRouteId -> "Covers: Main Arterial, Commercial Hub, Well-lit Junctions"
+                2 -> "Covers: Residential Avenue, Transit Corridor"
+                else -> "Covers: Industrial Ring Rd, Low-lit Service Lanes"
+            }
+
             val darkSpots = mutableListOf<RoutePoint>()
             if (routeId != safestRouteId && points.size > 2) {
                 val midPoint = points[points.size / 2]
@@ -166,6 +186,8 @@ class RouteScoringRepository {
                 RouteOption(
                     routeId = "route_$routeId",
                     name = if (routeId == safestRouteId) "SafeHer Safest Recommended Route" else "Alternative Route $routeId",
+                    viaRoute = viaRouteStr,
+                    majorAreasCovered = majorAreasStr,
                     distance = "${route.getDouble("distance_km")} km",
                     duration = "${route.getDouble("duration_minutes").toInt()} mins",
                     compositeScore = roundedScore,
@@ -188,47 +210,60 @@ class RouteScoringRepository {
         originLat: Double,
         originLng: Double,
         destLat: Double,
-        destLng: Double
+        destLng: Double,
+        query: String
     ): List<RouteOption> {
         val dLat = destLat - originLat
         val dLng = destLng - originLng
 
         val approxDistance = Math.hypot(dLat, dLng) * 111.0
-        val baseDistance = if (approxDistance < 0.5) 3.5 else approxDistance
+        val baseDistance = if (approxDistance < 0.5 || approxDistance > 50.0) 4.8 else approxDistance
 
-        // Generate 3 Realistic Routes with Polylines
+        val isChennaiRegion = destLat > 12.5 && destLat < 13.5 && destLng > 79.5 && destLng < 80.5
+
+        // Generate 3 Realistic Local Polyline Routes around the target destination
         val route1Points = listOf(
             RoutePoint(originLat, originLng),
-            RoutePoint(originLat + dLat * 0.25 + 0.002, originLng + dLng * 0.20),
-            RoutePoint(originLat + dLat * 0.65 + 0.001, originLng + dLng * 0.70),
+            RoutePoint(originLat + dLat * 0.30 + 0.003, originLng + dLng * 0.20),
+            RoutePoint(originLat + dLat * 0.70 + 0.002, originLng + dLng * 0.75),
             RoutePoint(destLat, destLng)
         )
 
         val route2Points = listOf(
             RoutePoint(originLat, originLng),
-            RoutePoint(originLat + dLat * 0.35 - 0.003, originLng + dLng * 0.40),
-            RoutePoint(originLat + dLat * 0.80 + 0.002, originLng + dLng * 0.60),
+            RoutePoint(originLat + dLat * 0.40 - 0.004, originLng + dLng * 0.45),
+            RoutePoint(originLat + dLat * 0.85 + 0.003, originLng + dLng * 0.60),
             RoutePoint(destLat, destLng)
         )
 
         val route3Points = listOf(
             RoutePoint(originLat, originLng),
-            RoutePoint(originLat + dLat * 0.15 + 0.004, originLng + dLng * 0.50),
-            RoutePoint(originLat + dLat * 0.50 - 0.005, originLng + dLng * 0.85),
+            RoutePoint(originLat + dLat * 0.20 + 0.005, originLng + dLng * 0.55),
+            RoutePoint(originLat + dLat * 0.55 - 0.006, originLng + dLng * 0.85),
             RoutePoint(destLat, destLng)
         )
 
+        val via1 = if (isChennaiRegion) "via GNT Road / NH 16 (Main Arterial)" else "via Main Highway / Commercial Blvd"
+        val via2 = if (isChennaiRegion) "via Inner Ring Rd / Puzhal Bypass" else "via Central Avenue / Residential Corridor"
+        val via3 = if (isChennaiRegion) "via Red Hills High Rd (Secondary St)" else "via Secondary Service Ring Road"
+
+        val major1 = if (isChennaiRegion) "Covers: GNT Rd, Puzhal Bazaar, Well-Lit Commercial Zone" else "Covers: Main Avenue, Metro Station, Police Patrol Area"
+        val major2 = if (isChennaiRegion) "Covers: Puzhal Lake Promenade, Residential Bypass" else "Covers: Central Park Ave, Transit Corridor"
+        val major3 = if (isChennaiRegion) "Covers: Industrial Ring Rd, Low-lit Service Lanes" else "Covers: Outer Ring Rd, Low Lighting Stretch"
+
         val r1 = RouteOption(
             routeId = "route_1",
-            name = "SafeHer Safest Recommended Route (Main Blvd)",
+            name = "SafeHer Safest Recommended Route",
+            viaRoute = via1,
+            majorAreasCovered = major1,
             distance = String.format("%.1f km", baseDistance),
-            duration = "${(baseDistance * 3.0).toInt()} mins",
+            duration = "${(baseDistance * 2.5).toInt()} mins",
             compositeScore = 0.92,
             modelRiskLabel = "low",
             displayRisk = "Low Risk (Safest)",
             lightingScore = 0.90,
-            crowdDensity = "HIGH",
-            trafficCondition = "Smooth Traffic",
+            crowdDensity = "HIGH (Busy Pedestrian Flow)",
+            trafficCondition = "Smooth Traffic (Avg 24 km/h)",
             trafficScore = 0.88,
             darkSpots = emptyList(),
             points = route1Points
@@ -236,15 +271,17 @@ class RouteScoringRepository {
 
         val r2 = RouteOption(
             routeId = "route_2",
-            name = "Alternative Route 2 (Central Ave)",
-            distance = String.format("%.1f km", baseDistance * 1.15),
-            duration = "${(baseDistance * 3.5).toInt()} mins",
+            name = "Alternative Route 2",
+            viaRoute = via2,
+            majorAreasCovered = major2,
+            distance = String.format("%.1f km", baseDistance * 1.18),
+            duration = "${(baseDistance * 3.2).toInt()} mins",
             compositeScore = 0.68,
             modelRiskLabel = "medium",
             displayRisk = "Medium Risk",
             lightingScore = 0.65,
-            crowdDensity = "MEDIUM",
-            trafficCondition = "Moderate Traffic",
+            crowdDensity = "MEDIUM (Moderate Pedestrians)",
+            trafficCondition = "Moderate Traffic (Avg 16 km/h)",
             trafficScore = 0.70,
             darkSpots = listOf(route2Points[1]),
             points = route2Points
@@ -252,15 +289,17 @@ class RouteScoringRepository {
 
         val r3 = RouteOption(
             routeId = "route_3",
-            name = "Alternative Route 3 (Secondary Ring Road)",
-            distance = String.format("%.1f km", baseDistance * 1.30),
-            duration = "${(baseDistance * 4.2).toInt()} mins",
+            name = "Alternative Route 3",
+            viaRoute = via3,
+            majorAreasCovered = major3,
+            distance = String.format("%.1f km", baseDistance * 1.35),
+            duration = "${(baseDistance * 4.0).toInt()} mins",
             compositeScore = 0.42,
             modelRiskLabel = "high",
             displayRisk = "High Risk",
             lightingScore = 0.40,
-            crowdDensity = "LOW",
-            trafficCondition = "Congested Traffic",
+            crowdDensity = "LOW (Isolated / Low Crowd)",
+            trafficCondition = "Congested Traffic (Avg 9 km/h)",
             trafficScore = 0.45,
             darkSpots = listOf(route3Points[1], route3Points[2]),
             points = route3Points

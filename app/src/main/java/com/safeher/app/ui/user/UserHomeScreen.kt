@@ -46,6 +46,7 @@ fun UserHomeScreen(
 
     LaunchedEffect(user.uid) {
         sosViewModel.observeActiveAlert(user.uid)
+        homeViewModel.startLocationUpdates(user.uid)
     }
 
     LaunchedEffect(offlineSosMessage) {

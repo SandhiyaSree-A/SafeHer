@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -59,11 +60,26 @@ fun JourneyTabContent(
         position = CameraPosition.fromLatLngZoom(originLatLng, 13f)
     }
 
-    // Auto center map camera when destination or origin changes
-    LaunchedEffect(uiState.destLat, uiState.destLng) {
-        val centerLat = (uiState.originLat + uiState.destLat) / 2.0
-        val centerLng = (uiState.originLng + uiState.destLng) / 2.0
-        cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(centerLat, centerLng), 12.5f)
+    // Auto center map camera to fit full route polylines when destination or routes change
+    LaunchedEffect(uiState.destLat, uiState.destLng, uiState.routes) {
+        if (uiState.destLat != 0.0 && uiState.destLng != 0.0) {
+            val selected = uiState.selectedRoute ?: uiState.routes.firstOrNull()
+            if (selected != null && selected.points.isNotEmpty()) {
+                val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
+                selected.points.forEach { builder.include(LatLng(it.lat, it.lng)) }
+                if (uiState.originLat != 0.0 && uiState.originLat != selected.points.first().lat) {
+                    builder.include(LatLng(uiState.originLat, uiState.originLng))
+                }
+                val bounds = builder.build()
+                try {
+                    cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 100))
+                } catch (e: Exception) {
+                    cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 13.5f)
+                }
+            } else {
+                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 14f))
+            }
+        }
     }
 
     // Modal Deviation Warning Popup Dialog
@@ -456,19 +472,30 @@ fun RouteCardItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = null,
-                        tint = badgeColor,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = route.name,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = badgeColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = route.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                    if (route.viaRoute.isNotBlank()) {
+                        Text(
+                            text = route.viaRoute,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
 
                 Surface(
@@ -485,6 +512,15 @@ fun RouteCardItem(
                 }
             }
 
+            if (route.majorAreasCovered.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = route.majorAreasCovered,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             Spacer(modifier = Modifier.height(6.dp))
 
             Row(
@@ -493,12 +529,14 @@ fun RouteCardItem(
             ) {
                 Text(
                     text = "${route.distance} • ${route.duration}",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.outline
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Light: ${(route.lightingScore * 100).toInt()}% | Crowd: ${route.crowdDensity}",
+                    text = "Light: ${(route.lightingScore * 100).toInt()}%",
                     fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.outline
                 )
             }
@@ -517,12 +555,21 @@ fun RouteCardItem(
                     color = MaterialTheme.colorScheme.secondary
                 )
                 Text(
-                    text = "Risk: ${route.displayRisk}",
+                    text = "Crowd: ${route.crowdDensity}",
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = badgeColor
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.tertiary
                 )
             }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = "Risk Level: ${route.displayRisk}",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = badgeColor
+            )
         }
     }
 }
