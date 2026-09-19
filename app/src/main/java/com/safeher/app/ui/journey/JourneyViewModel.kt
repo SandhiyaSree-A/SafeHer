@@ -83,37 +83,67 @@ class JourneyViewModel(
                 ) 
             }
 
-            val result = repository.scoreRoutes(
+            val apiKey = com.safeher.app.BuildConfig.MAPS_API_KEY
+
+            // 1. Geocode Destination
+            val geocodeResult = repository.geocodeDestination(targetQuery, apiKey)
+            val geocoded = geocodeResult.getOrNull()
+
+            val finalDestLat: Double
+            val finalDestLng: Double
+            val finalDestAddress: String
+
+            if (geocoded != null && geocoded.lat != 0.0 && geocoded.lng != 0.0) {
+                finalDestLat = geocoded.lat
+                finalDestLng = geocoded.lng
+                finalDestAddress = geocoded.formattedAddress
+            } else {
+                finalDestLat = _uiState.value.originLat + 0.035 + (targetQuery.hashCode() % 100) * 0.0003
+                finalDestLng = _uiState.value.originLng + 0.045 + (targetQuery.hashCode() % 100) * 0.0003
+                finalDestAddress = targetQuery
+            }
+
+            _uiState.update { 
+                it.copy(
+                    destLat = finalDestLat, 
+                    destLng = finalDestLng,
+                    destinationAddress = finalDestAddress
+                ) 
+            }
+
+            // 2. Fetch Directions and Score Routes
+            val result = repository.scoreDynamicRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
+                destLat = finalDestLat,
+                destLng = finalDestLng,
                 destinationQuery = targetQuery,
-                mode = _uiState.value.selectedTransportMode
+                apiKey = apiKey
             )
 
             result.fold(
                 onSuccess = { routes ->
-                    val firstRoute = routes.firstOrNull()
-                    val lastPoint = firstRoute?.points?.lastOrNull()
-                    val firstTurn = firstRoute?.turnSteps?.firstOrNull()
-
-                    _uiState.update {
-                        it.copy(
-                            routes = routes,
-                            selectedRoute = firstRoute,
-                            currentTurnStep = firstTurn,
-                            destLat = lastPoint?.lat ?: it.destLat,
-                            destLng = lastPoint?.lng ?: it.destLng,
-                            isLoading = false
-                        )
+                    if (routes.isEmpty()) {
+                        _uiState.update { it.copy(isLoading = false, errorMessage = "No routes found for destination. Try a different query.") }
+                    } else {
+                        val firstRoute = routes.first()
+                        val lastPoint = firstRoute.points.lastOrNull()
+                        val firstTurn = firstRoute.turnSteps.firstOrNull()
+                        _uiState.update {
+                            it.copy(
+                                routes = routes,
+                                selectedRoute = firstRoute,
+                                currentTurnStep = firstTurn,
+                                destLat = lastPoint?.lat ?: it.destLat,
+                                destLng = lastPoint?.lng ?: it.destLng,
+                                isLoading = false,
+                                errorMessage = null
+                            )
+                        }
                     }
                 },
                 onFailure = { err ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = err.localizedMessage ?: "Failed to retrieve real-time routes"
-                        )
-                    }
+                    _uiState.update { it.copy(isLoading = false, errorMessage = err.localizedMessage ?: "Failed to find or score routes") }
                 }
             )
         }
