@@ -10,6 +10,7 @@ import com.safeher.app.data.repository.AuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.safeher.app.util.PhoneUtils
 
 sealed class AuthUiState {
     object Idle : AuthUiState()
@@ -52,6 +53,12 @@ class AuthViewModel(
     private val _verificationId = MutableStateFlow("")
     val verificationId: StateFlow<String> = _verificationId.asStateFlow()
 
+    private val _otpError = MutableStateFlow<String?>(null)
+val otpError: StateFlow<String?> = _otpError.asStateFlow()
+
+private val _isVerifyingOtp = MutableStateFlow(false)
+val isVerifyingOtp: StateFlow<Boolean> = _isVerifyingOtp.asStateFlow()
+
     fun toggleAuthMode(signUp: Boolean) {
         _isSignUpMode.value = signUp
         _uiState.value = AuthUiState.Idle
@@ -59,6 +66,7 @@ class AuthViewModel(
         _password.value = ""
         _confirmPassword.value = ""
         _disambiguationPhone.value = ""
+        _otpError.value = null
     }
 
     fun updateName(name: String) {
@@ -87,60 +95,71 @@ class AuthViewModel(
 
     // SIGNUP FLOW: Step 1 -> Send OTP
     fun sendSignupOtp(activity: Activity) {
-        val nameVal = _name.value.trim()
-        val phoneVal = _phoneNumber.value.trim()
+    val nameVal = _name.value.trim()
+    val phoneVal = PhoneUtils.normalizeIndian(_phoneNumber.value.trim())
 
-        if (nameVal.isEmpty()) {
-            _uiState.value = AuthUiState.Error("Please enter your name.")
-            return
-        }
-        if (phoneVal.isEmpty()) {
-            _uiState.value = AuthUiState.Error("Please enter your phone number.")
-            return
-        }
-
-        _uiState.value = AuthUiState.Loading
-
-        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-            override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                // Auto-retrieved or instant verification
-                _uiState.value = AuthUiState.OtpVerified
-            }
-
-            override fun onVerificationFailed(e: FirebaseException) {
-                val rawMsg = e.localizedMessage ?: "Phone verification failed."
-                val errorMsg = if (rawMsg.contains("PERMISSION_DENIED", ignoreCase = true)) {
-                    "Firebase Phone Auth permission error. Please enable Phone provider in Firebase Console -> Authentication -> Sign-in method, add SHA-1 fingerprint, or add this phone under 'Phone numbers for testing'."
-                } else {
-                    rawMsg
-                }
-                _uiState.value = AuthUiState.Error(errorMsg)
-            }
-
-            override fun onCodeSent(
-                verificationId: String,
-                token: PhoneAuthProvider.ForceResendingToken
-            ) {
-                _verificationId.value = verificationId
-                _uiState.value = AuthUiState.OtpSent
-            }
-        }
-
-        repository.sendOtp(phoneVal, activity, callbacks)
+    if (nameVal.isEmpty()) {
+        _uiState.value = AuthUiState.Error("Please enter your name.")
+        return
     }
+    if (!PhoneUtils.isValidIndianMobile(phoneVal)) {
+        _uiState.value = AuthUiState.Error("Enter a valid 10-digit Indian mobile number.")
+        return
+    }
+    _phoneNumber.value = phoneVal   // shows +91XXXXXXXXXX on the OTP screen
+    _otpError.value = null
+    _uiState.value = AuthUiState.Loading
+
+    val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+        override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+            // Instant / auto-retrieved SMS: verify for real
+            repository.signInWithPhoneCredential(
+                credential,
+                onSuccess = { _uiState.value = AuthUiState.OtpVerified },
+                onFailure = { _uiState.value = AuthUiState.Error(it.localizedMessage ?: "Verification failed.") }
+            )
+        }
+
+        override fun onVerificationFailed(e: FirebaseException) {
+            val rawMsg = e.localizedMessage ?: "Phone verification failed."
+            val errorMsg = if (rawMsg.contains("PERMISSION_DENIED", ignoreCase = true)) {
+                "Firebase Phone Auth permission error. Enable the Phone provider and add your SHA-1/SHA-256 fingerprints in Firebase Console."
+            } else rawMsg
+            _uiState.value = AuthUiState.Error(errorMsg)
+        }
+
+        override fun onCodeSent(verificationId: String, token: PhoneAuthProvider.ForceResendingToken) {
+            _verificationId.value = verificationId
+            _uiState.value = AuthUiState.OtpSent
+        }
+    }
+
+    repository.sendOtp(phoneVal, activity, callbacks)
+}
 
     // SIGNUP FLOW: Step 2 -> Verify OTP
     fun verifySignupOtp() {
-        val code = _otpCode.value.trim()
-
-        if (code.length < 6) {
-            _uiState.value = AuthUiState.Error("Please enter the 6-digit OTP code.")
-            return
-        }
-
-        // OTP code validated, proceed to set password
-        _uiState.value = AuthUiState.OtpVerified
+    val code = _otpCode.value.trim()
+    if (code.length < 6) {
+        _otpError.value = "Please enter the 6-digit OTP code."
+        return
     }
+    _otpError.value = null
+    _isVerifyingOtp.value = true
+
+    val credential = PhoneAuthProvider.getCredential(_verificationId.value, code)
+    repository.signInWithPhoneCredential(
+        credential,
+        onSuccess = {
+            _isVerifyingOtp.value = false
+            _uiState.value = AuthUiState.OtpVerified
+        },
+        onFailure = {
+            _isVerifyingOtp.value = false
+            _otpError.value = "Incorrect or expired OTP. Please try again."
+        }
+    )
+}
 
     // SIGNUP FLOW: Step 3 -> Set Password & Create Account
     fun completeSignupWithPassword() {
@@ -203,21 +222,21 @@ class AuthViewModel(
     }
 
     fun checkExistingSession() {
-        val currentUser = repository.getCurrentUser()
-        if (currentUser != null) {
-            _uiState.value = AuthUiState.Loading
-            repository.syncUserDocument(
-                uid = currentUser.uid,
-                phone = currentUser.phoneNumber ?: "",
-                onSuccess = { user ->
-                    _uiState.value = AuthUiState.Success(user)
-                },
-                onFailure = {
-                    _uiState.value = AuthUiState.Idle
-                }
-            )
+    val currentUser = repository.getCurrentUser()
+    if (currentUser != null) {
+        if (currentUser.email.isNullOrBlank()) {   // phone verified, signup never finished
+            repository.signOut()
+            return
         }
+        _uiState.value = AuthUiState.Loading
+        repository.syncUserDocument(
+            uid = currentUser.uid,
+            phone = currentUser.phoneNumber ?: "",
+            onSuccess = { user -> _uiState.value = AuthUiState.Success(user) },
+            onFailure = { _uiState.value = AuthUiState.Idle }
+        )
     }
+}
 
     fun resetState() {
         _uiState.value = AuthUiState.Idle

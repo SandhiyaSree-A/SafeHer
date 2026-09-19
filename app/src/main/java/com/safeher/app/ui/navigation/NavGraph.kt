@@ -51,6 +51,9 @@ fun SafeHerNavGraph(
             currentUserState?.let { user ->
                 UserHomeScreen(
                     user = user,
+                    onUserUpdated = { updatedUser ->
+                        currentUserState = updatedUser
+                    },
                     onSignOut = {
                         onSignOut()
                         navController.navigate(Screen.Auth.route) {

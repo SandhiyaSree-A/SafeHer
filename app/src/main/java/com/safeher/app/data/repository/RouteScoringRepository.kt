@@ -1,6 +1,7 @@
 package com.safeher.app.data.repository
 
 import com.google.firebase.FirebaseApp
+import com.safeher.app.data.offline.OfflineSyncRepository
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.maps.android.PolyUtil
 import com.safeher.app.data.model.Journey
@@ -263,6 +264,13 @@ class RouteScoringRepository {
             )
         )
 
+        val route3Points = listOf(
+            RoutePoint(originLat, originLng),
+            RoutePoint(originLat + dLat * 0.2, originLng + dLng * 0.5),
+            RoutePoint(originLat + dLat * 0.6, originLng + dLng * 0.6),
+            RoutePoint(destLat, destLng)
+        )
+
         val r3 = RouteOption(
             routeId = "route_3",
             name = "Via Service Bypass (Secondary Alley)",
@@ -275,6 +283,7 @@ class RouteScoringRepository {
             crowdDensity = "LOW (Isolated / Low Crowd)",
             trafficCondition = "Congested Traffic (Avg 9 km/h)",
             trafficScore = 0.45,
+            disclaimer = disclaimerText,
             darkSpots = listOf(route3Points[1], route3Points[2]),
             points = route3Points
         )

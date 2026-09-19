@@ -10,6 +10,9 @@ import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.safeher.app.data.model.User
 import java.util.concurrent.TimeUnit
+import com.google.firebase.auth.EmailAuthProvider
+import com.google.firebase.auth.FirebaseAuthException
+import com.safeher.app.util.PhoneUtils
 
 class AuthRepository(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
@@ -19,10 +22,16 @@ class AuthRepository(
     companion object {
         const val GENERIC_AUTH_ERROR = "Invalid name or password"
 
-        fun generateSyntheticEmail(phoneNumber: String): String {
-            val cleanPhone = phoneNumber.filter { it.isLetterOrDigit() }.ifBlank { "user" }
-            return "${cleanPhone.lowercase()}@safeher.app"
-        }
+        /** Really verifies the OTP with Firebase. Signs the user in with the phone credential. */
+fun signInWithPhoneCredential(
+    credential: PhoneAuthCredential,
+    onSuccess: () -> Unit,
+    onFailure: (Exception) -> Unit
+) {
+    auth.signInWithCredential(credential)
+        .addOnSuccessListener { onSuccess() }
+        .addOnFailureListener(onFailure)
+}
     }
 
     fun getCurrentUser() = auth.currentUser
@@ -48,55 +57,53 @@ class AuthRepository(
      * Creates account with synthetic email and chosen password after OTP verification.
      */
     fun createAccountWithPassword(
-        name: String,
-        phone: String,
-        password: String,
-        onSuccess: (User) -> Unit,
-        onFailure: (Exception) -> Unit
-    ) {
-        val syntheticEmail = generateSyntheticEmail(phone)
-        auth.createUserWithEmailAndPassword(syntheticEmail, password)
-            .addOnSuccessListener { authResult ->
-                val firebaseUser = authResult.user
-                if (firebaseUser != null) {
-                    val newUser = User(
-                        uid = firebaseUser.uid,
-                        name = name.trim(),
-                        phone = phone.trim(),
-                        role = User.ROLE_USER,
-                        createdAt = System.currentTimeMillis()
-                    )
-                    val userData = mapOf(
-                        "uid" to newUser.uid,
-                        "name" to newUser.name,
-                        "phone" to newUser.phone,
-                        "role" to newUser.role,
-                        "createdAt" to newUser.createdAt
-                    )
-                    firestore.collection("users").document(firebaseUser.uid)
-                        .set(userData)
-                        .addOnSuccessListener { onSuccess(newUser) }
-                        .addOnFailureListener(onFailure)
-                } else {
-                    onFailure(Exception("Authentication user creation returned null."))
-                }
-            }
-            .addOnFailureListener { ex ->
-                if (ex is FirebaseAuthUserCollisionException) {
-                    // If user already exists in auth, attempt signing in to update profile
-                    auth.signInWithEmailAndPassword(syntheticEmail, password)
-                        .addOnSuccessListener { authResult ->
-                            val uid = authResult.user?.uid ?: ""
-                            syncUserDocument(uid, phone, onSuccess, onFailure)
-                        }
-                        .addOnFailureListener {
-                            onFailure(Exception("An account with this phone number already exists."))
-                        }
-                } else {
-                    onFailure(ex)
-                }
-            }
+    name: String,
+    phone: String,
+    password: String,
+    onSuccess: (User) -> Unit,
+    onFailure: (Exception) -> Unit
+) {
+    val firebaseUser = auth.currentUser
+    if (firebaseUser == null) {
+        onFailure(Exception("Phone not verified. Please verify the OTP again."))
+        return
     }
+    val normalizedPhone = PhoneUtils.normalizeIndian(phone)
+    val emailCredential = EmailAuthProvider.getCredential(
+        generateSyntheticEmail(normalizedPhone), password
+    )
+
+    firebaseUser.linkWithCredential(emailCredential)
+        .addOnSuccessListener {
+            val newUser = User(
+                uid = firebaseUser.uid,
+                name = name.trim(),
+                phone = normalizedPhone,
+                role = User.ROLE_USER,
+                createdAt = System.currentTimeMillis()
+            )
+            val userData = mapOf(
+                "uid" to newUser.uid,
+                "name" to newUser.name,
+                "phone" to newUser.phone,
+                "role" to newUser.role,
+                "createdAt" to newUser.createdAt
+            )
+            firestore.collection("users").document(firebaseUser.uid)
+                .set(userData)
+                .addOnSuccessListener { onSuccess(newUser) }
+                .addOnFailureListener(onFailure)
+        }
+        .addOnFailureListener { ex ->
+            auth.signOut()
+            val alreadyExists = ex is FirebaseAuthUserCollisionException ||
+                (ex as? FirebaseAuthException)?.errorCode == "ERROR_PROVIDER_ALREADY_LINKED"
+            onFailure(
+                if (alreadyExists) Exception("An account with this phone number already exists. Please sign in.")
+                else ex
+            )
+        }
+}
 
     /**
      * Looks up users in Firestore by Name.
@@ -193,6 +200,55 @@ class AuthRepository(
             .addOnFailureListener {
                 onFailure(Exception(GENERIC_AUTH_ERROR))
             }
+    }
+
+        /**
+     * Updates the current user's name/phone in Firestore and returns the
+     * refreshed User object so the UI can update immediately.
+     */
+    fun updateProfile(
+        uid: String,
+        name: String,
+        phone: String,
+        onSuccess: (User) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        val trimmedName = name.trim()
+        if (trimmedName.isBlank()) {
+            onFailure(Exception("Name cannot be empty."))
+            return
+        }
+        val normalizedPhone = PhoneUtils.normalizeIndian(phone.trim())
+        if (!PhoneUtils.isValidPhone(normalizedPhone)) {
+            onFailure(Exception("Enter a valid phone number (10-digit Indian mobile, or +country code)."))
+            return
+        }
+
+        val userDocRef = firestore.collection("users").document(uid)
+        userDocRef.get()
+            .addOnSuccessListener { snapshot ->
+                val role = snapshot.getString("role") ?: User.ROLE_USER
+                val createdAt = snapshot.getLong("createdAt") ?: System.currentTimeMillis()
+
+                val updates = mapOf(
+                    "name" to trimmedName,
+                    "phone" to normalizedPhone
+                )
+                userDocRef.set(updates, com.google.firebase.firestore.SetOptions.merge())
+                    .addOnSuccessListener {
+                        onSuccess(
+                            User(
+                                uid = uid,
+                                name = trimmedName,
+                                phone = normalizedPhone,
+                                role = role,
+                                createdAt = createdAt
+                            )
+                        )
+                    }
+                    .addOnFailureListener(onFailure)
+            }
+            .addOnFailureListener(onFailure)
     }
 
     fun syncUserDocument(

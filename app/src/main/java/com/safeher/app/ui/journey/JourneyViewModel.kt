@@ -85,7 +85,7 @@ class JourneyViewModel(
 
             
 
-            val result = repository.scoreRoutes(
+            val result = repository.scoreDynamicRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
                 destinationQuery = targetQuery

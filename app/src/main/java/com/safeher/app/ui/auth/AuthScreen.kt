@@ -35,7 +35,8 @@ fun AuthScreen(
     val confirmPassword by viewModel.confirmPassword.collectAsState()
     val otpCode by viewModel.otpCode.collectAsState()
     val disambiguationPhone by viewModel.disambiguationPhone.collectAsState()
-
+    val otpError by viewModel.otpError.collectAsState()
+val isVerifyingOtp by viewModel.isVerifyingOtp.collectAsState()
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
             onAuthSuccess((uiState as AuthUiState.Success).user)
@@ -297,6 +298,15 @@ fun AuthScreen(
                                     .fillMaxWidth()
                                     .padding(bottom = 16.dp)
                             )
+otpError?.let {
+    Text(
+        text = it,
+        color = MaterialTheme.colorScheme.error,
+        fontSize = 13.sp,
+        modifier = Modifier.padding(bottom = 8.dp)
+    )
+}
+
 
                             Button(
                                 onClick = { viewModel.verifySignupOtp() },

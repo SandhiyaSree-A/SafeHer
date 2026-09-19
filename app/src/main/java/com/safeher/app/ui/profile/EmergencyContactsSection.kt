@@ -1,6 +1,8 @@
 package com.safeher.app.ui.profile
 
-import android.net.Uri
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.provider.ContactsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,8 +27,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.safeher.app.data.model.EmergencyContact
 import com.safeher.app.data.model.User
+import com.safeher.app.util.PhoneUtils
 
 @Composable
 fun EmergencyContactsSection(
@@ -48,44 +52,38 @@ fun EmergencyContactsSection(
         viewModel.loadContacts(user.uid)
     }
 
-    // Contacts Picker Intent launcher
-    val pickContactLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickContact()
-    ) { contactUri: Uri? ->
-        contactUri?.let { uri ->
-            val contentResolver = context.contentResolver
-            val cursor = contentResolver.query(uri, null, null, null, null)
-            cursor?.use { c ->
+    // Picks one specific phone number (works when a contact has several numbers)
+    val pickPhoneLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uri = result.data?.data
+        if (uri != null) {
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                null, null, null
+            )?.use { c ->
                 if (c.moveToFirst()) {
-                    val idIndex = c.getColumnIndex(ContactsContract.Contacts._ID)
-                    val nameIndex = c.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME)
-
-                    val contactId = if (idIndex >= 0) c.getString(idIndex) else ""
-                    val contactName = if (nameIndex >= 0) c.getString(nameIndex) else ""
-
-                    nameInput = contactName
-
-                    // Query Phone number
-                    if (contactId.isNotEmpty()) {
-                        val phoneCursor = contentResolver.query(
-                            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                            null,
-                            "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
-                            arrayOf(contactId),
-                            null
-                        )
-                        phoneCursor?.use { pc ->
-                            if (pc.moveToFirst()) {
-                                val pIndex = pc.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                                if (pIndex >= 0) {
-                                    phoneInput = pc.getString(pIndex)
-                                }
-                            }
-                        }
-                    }
+                    nameInput = c.getString(0) ?: ""
+                    phoneInput = PhoneUtils.normalizeIndian(c.getString(1) ?: "")
                 }
             }
         }
+    }
+
+    fun launchPicker() {
+        pickPhoneLauncher.launch(
+            Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+        )
+    }
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchPicker() // if denied, the user can still type the number manually
     }
 
     Column(
@@ -198,7 +196,16 @@ fun EmergencyContactsSection(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
-                        onClick = { pickContactLauncher.launch(null) },
+                        onClick = {
+                            if (ContextCompat.checkSelfPermission(
+                                    context, Manifest.permission.READ_CONTACTS
+                                ) == PackageManager.PERMISSION_GRANTED
+                            ) {
+                                launchPicker()
+                            } else {
+                                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.ContactPhone, contentDescription = "Pick Contact")
@@ -218,7 +225,7 @@ fun EmergencyContactsSection(
                     OutlinedTextField(
                         value = phoneInput,
                         onValueChange = { phoneInput = it },
-                        label = { Text("Phone Number") },
+                        label = { Text("Phone Number (+91 added automatically)") },
                         leadingIcon = { Icon(Icons.Default.Phone, contentDescription = "Phone") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         singleLine = true,
