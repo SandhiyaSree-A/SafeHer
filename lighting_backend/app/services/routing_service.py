@@ -1,6 +1,21 @@
+import os
 import requests
 
-OSRM_BASE_URL = "https://router.project-osrm.org"
+# Load Google Maps API Key from local.properties or env
+def get_maps_api_key():
+    key = os.environ.get("MAPS_API_KEY")
+    if key: return key
+    try:
+        # Check parent directories for local.properties
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
+        with open(os.path.join(project_root, "local.properties"), "r") as f:
+            for line in f:
+                if line.startswith("MAPS_API_KEY="):
+                    return line.split("=")[1].strip()
+    except Exception:
+        pass
+    return None
 
 def get_routes(
     source_lat: float,
@@ -10,97 +25,70 @@ def get_routes(
     mode: str = "driving"
 ):
     """
-    Get alternative routes (driving, walking, bike) from OSRM
-    with turn-by-turn step details and real street names.
+    Get alternative routes (driving, walking, bike) from Google Maps Directions API
+    with traffic duration and polyline.
     """
-    osrm_profile = "driving"
+    api_key = get_maps_api_key()
+    if not api_key:
+        raise RuntimeError("MAPS_API_KEY is not set or found in local.properties")
+        
+    gmaps_mode = "driving"
     if mode in ["walking", "walk"]:
-        osrm_profile = "foot"
+        gmaps_mode = "walking"
     elif mode in ["bicycling", "bike"]:
-        osrm_profile = "bike"
+        gmaps_mode = "bicycling"
 
-    url = (
-        f"{OSRM_BASE_URL}/route/v1/{osrm_profile}/"
-        f"{source_lon},{source_lat};"
-        f"{destination_lon},{destination_lat}"
-    )
-
+    url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
-        "overview": "full",
-        "geometries": "geojson",
+        "origin": f"{source_lat},{source_lon}",
+        "destination": f"{destination_lat},{destination_lon}",
+        "mode": gmaps_mode,
         "alternatives": "true",
-        "steps": "true"
+        "departure_time": "now",
+        "key": api_key
     }
 
-    print(f"\nRequesting real-time {mode} routes from OSRM...")
+    print(f"\nRequesting real-time {mode} routes from Google Maps API...")
 
     response = requests.get(url, params=params, timeout=30)
     if response.status_code != 200:
-        raise RuntimeError(f"OSRM routing failed with status {response.status_code}")
+        raise RuntimeError(f"Google Maps API failed with status {response.status_code}")
 
     data = response.json()
-    if data.get("code") != "Ok":
-        raise RuntimeError(f"OSRM returned error code: {data}")
+    if data.get("status") != "OK":
+        if data.get("status") == "ZERO_RESULTS":
+            return []
+        raise RuntimeError(f"Google Maps API returned error: {data.get('status')}")
 
     routes = []
     for index, route in enumerate(data.get("routes", [])):
-        coordinates = route["geometry"]["coordinates"]
+        # Decode overview_polyline
+        import polyline
+        encoded_polyline = route["overview_polyline"]["points"]
+        coordinates = polyline.decode(encoded_polyline)
         route_points = [
-            {"latitude": coord[1], "longitude": coord[0]}
+            {"latitude": coord[0], "longitude": coord[1]}
             for coord in coordinates
         ]
 
-        legs = route.get("legs", [])
-        street_names = []
-        turn_steps = []
+        leg = route["legs"][0]
+        distance_meters = leg["distance"]["value"]
+        duration_seconds = leg["duration"]["value"]
+        duration_in_traffic_seconds = leg.get("duration_in_traffic", {}).get("value", duration_seconds)
 
-        if legs:
-            leg = legs[0]
-            summary_name = leg.get("summary", "")
-            if summary_name:
-                street_names.append(summary_name)
-
-            for step in leg.get("steps", []):
-                step_name = step.get("name", "").strip()
-                if step_name and step_name not in street_names:
-                    street_names.append(step_name)
-
-                maneuver = step.get("maneuver", {})
-                maneuver_location = maneuver.get("location", [source_lon, source_lat])
-                maneuver_type = maneuver.get("type", "turn")
-                maneuver_modifier = maneuver.get("modifier", "")
-
-                instruction = f"{maneuver_type.capitalize()} {maneuver_modifier}".strip()
-                if step_name:
-                    instruction += f" onto {step_name}"
-
-                turn_steps.append({
-                    "instruction": instruction,
-                    "road_name": step_name or "Main Road",
-                    "distance_meters": step.get("distance", 0.0),
-                    "duration_seconds": step.get("duration", 0.0),
-                    "start_lat": maneuver_location[1],
-                    "start_lng": maneuver_location[0]
-                })
-
-        # Formulate real via route description from actual step street names
-        unique_roads = [s for s in street_names if s]
-        if len(unique_roads) >= 2:
-            via_route_str = f"via {unique_roads[0]} / {unique_roads[1]}"
-        elif len(unique_roads) == 1:
-            via_route_str = f"via {unique_roads[0]}"
-        else:
-            via_route_str = f"via Primary Transport Corridor {index + 1}"
+        summary_name = route.get("summary", "")
+        via_route_str = f"via {summary_name}" if summary_name else f"via Alternative Route {index + 1}"
 
         routes.append({
             "route_id": index + 1,
             "transport_mode": mode,
-            "distance_meters": route["distance"],
-            "duration_seconds": route["duration"],
+            "distance_meters": distance_meters,
+            "duration_seconds": duration_seconds,
+            "duration_in_traffic_seconds": duration_in_traffic_seconds,
             "via_route": via_route_str,
-            "street_names": unique_roads,
+            "street_names": [summary_name] if summary_name else [],
             "coordinates": route_points,
-            "turn_steps": turn_steps
+            "encoded_polyline": encoded_polyline
         })
 
     return routes

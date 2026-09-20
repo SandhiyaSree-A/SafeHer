@@ -141,27 +141,11 @@ class RouteScoringRepository {
             val averageLightScore = route.optDouble("average_light_score", 70.0)
             val lightingNorm = lightingSafetyScore / 100.0
 
-            val crowdDensityStr = when (routeId) {
-                safestRouteId -> "HIGH (Busy Commercial Area)"
-                2 -> "MEDIUM (Moderate Pedestrians)"
-                else -> "LOW (Isolated Service Lanes)"
-            }
-            val crowdScore = when (routeId) {
-                safestRouteId -> 0.95
-                2 -> 0.65
-                else -> 0.35
-            }
-
-            val trafficCond = when (routeId) {
-                safestRouteId -> "Smooth Traffic (Avg 22 km/h)"
-                2 -> "Moderate Traffic (Avg 15 km/h)"
-                else -> "Congested Traffic (Avg 8 km/h)"
-            }
-            val trafficScore = when (routeId) {
-                safestRouteId -> 0.90
-                2 -> 0.65
-                else -> 0.40
-            }
+            val crowdDensityStr = route.optString("crowd_density", "Unknown")
+            val crowdScore = if (crowdDensityStr == "HIGH") 0.95 else if (crowdDensityStr == "MEDIUM") 0.65 else 0.35
+            
+            val trafficCond = route.optString("traffic_condition", "Unknown Traffic")
+            val trafficScore = route.optDouble("traffic_score", 0.50)
 
             // Weighted Composite Safety Score (45% Lighting + 35% Crowd + 20% Traffic)
             val compositeScore = (0.45 * lightingNorm + 0.35 * crowdScore + 0.20 * trafficScore).coerceIn(0.10, 0.99)
@@ -173,17 +157,8 @@ class RouteScoringRepository {
                 else -> "High Risk"
             }
 
-            val viaRouteStr = when (routeId) {
-                safestRouteId -> "via Main Highway / GNT Road (NH 16)"
-                2 -> "via Inner Ring Road / Bypass"
-                else -> "via Secondary Lake Service Road"
-            }
-
-            val majorAreasStr = when (routeId) {
-                safestRouteId -> "Covers: Main Arterial, Commercial Hub, Well-lit Junctions"
-                2 -> "Covers: Residential Avenue, Transit Corridor"
-                else -> "Covers: Industrial Ring Rd, Low-lit Service Lanes"
-            }
+            val viaRouteStr = route.optString("via_route", "via Alternative Route")
+            val majorAreasStr = "Covers: Primary computed route path"
 
             val darkSpots = mutableListOf<RoutePoint>()
             if (routeId != safestRouteId && points.size > 2) {

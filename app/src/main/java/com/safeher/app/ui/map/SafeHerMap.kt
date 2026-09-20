@@ -99,7 +99,8 @@ fun SafeHerMap(
                 CameraUpdateFactory.newCameraPosition(
                     CameraPosition.Builder()
                         .target(LatLng(pt.lat, pt.lng))
-                        .zoom(16.0)
+                        .zoom(18.0) // Closer zoom for navigation
+                        .tilt(45.0) // 3D tilt for navigation driving feel
                         .build()
                 ),
                 600

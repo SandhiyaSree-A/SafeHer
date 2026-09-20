@@ -197,24 +197,64 @@ fun JourneyTabContent(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    var expanded by remember { mutableStateOf(false) }
+                    val suggestions = listOf(
+                        "Central Railway Station", 
+                        "Phoenix Marketcity Mall", 
+                        "Apollo Hospital Main", 
+                        "Airport Terminal 1", 
+                        "Tidel Park IT SEZ"
+                    ).filter { it.contains(searchInput, ignoreCase = true) }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedTextField(
-                            value = searchInput,
-                            onValueChange = {
-                                searchInput = it
-                                viewModel.updateSearchQuery(it)
-                            },
-                            placeholder = { Text("Enter destination address or place...") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
+                        ExposedDropdownMenuBox(
+                            expanded = expanded,
+                            onExpandedChange = { expanded = !expanded },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = searchInput,
+                                onValueChange = {
+                                    searchInput = it
+                                    viewModel.updateSearchQuery(it)
+                                    expanded = true
+                                },
+                                placeholder = { Text("Enter exact address or place...") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                singleLine = true
+                            )
+                            
+                            if (suggestions.isNotEmpty() && searchInput.isNotBlank()) {
+                                ExposedDropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false }
+                                ) {
+                                    suggestions.forEach { suggestion ->
+                                        DropdownMenuItem(
+                                            text = { Text(suggestion) },
+                                            onClick = {
+                                                searchInput = suggestion
+                                                viewModel.updateSearchQuery(suggestion)
+                                                expanded = false
+                                                viewModel.searchAndScoreRoutes(suggestion)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
-                            onClick = { viewModel.searchAndScoreRoutes(searchInput) },
+                            onClick = { 
+                                expanded = false
+                                viewModel.searchAndScoreRoutes(searchInput) 
+                            },
                             modifier = Modifier.height(56.dp)
                         ) {
                             Text("Search")
@@ -497,8 +537,7 @@ fun RouteCardItem(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // SafetiPin Audit Breakdown Meter
-            val safeti = route.safetiPinMetrics
+            // Real-time Density Breakdown Meter
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
@@ -508,10 +547,9 @@ fun RouteCardItem(
                     modifier = Modifier.padding(6.dp),
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    Text("💡 Light: ${(safeti.lightingRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    Text("👁️ Eyes: ${(safeti.eyesOnStreetRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    Text("👮 Patrol: ${(safeti.patrolProximityRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    Text("🚌 Transit: ${(safeti.transitAccessRating * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("💡 Light: ${(route.lightingScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("🚶 Crowd: ${(route.trafficScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    Text("🚗 Traffic: ${(route.trafficScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 

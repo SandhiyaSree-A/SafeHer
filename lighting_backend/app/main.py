@@ -294,9 +294,26 @@ def analyze_route(request: RouteRequest):
             )
 
             route_id = route["route_id"]
-            crowd_density = "HIGH" if route_id == result["safest_route_id"] else ("MEDIUM" if route_id == 2 else "LOW")
-            traffic_condition = "Smooth Traffic" if route_id == result["safest_route_id"] else ("Moderate Traffic" if route_id == 2 else "Congested Traffic")
-            traffic_score = 0.90 if route_id == result["safest_route_id"] else (0.65 if route_id == 2 else 0.40)
+            
+            # Real-time traffic scoring
+            duration = route.get("duration_seconds", 1)
+            duration_traffic = route.get("duration_in_traffic_seconds", duration)
+            
+            # If duration in traffic is much higher than free flow, it's congested.
+            traffic_ratio = duration_traffic / max(duration, 1)
+            
+            if traffic_ratio <= 1.05:
+                traffic_condition = "Smooth Traffic"
+                traffic_score = 0.90
+            elif traffic_ratio <= 1.25:
+                traffic_condition = "Moderate Traffic"
+                traffic_score = 0.65
+            else:
+                traffic_condition = "Congested Traffic"
+                traffic_score = 0.40
+
+            # Proxied crowd density based on route ranking and traffic
+            crowd_density = "HIGH" if route_id == result["safest_route_id"] else ("MEDIUM" if traffic_score > 0.5 else "LOW")
 
             all_routes.append({
 
@@ -327,6 +344,8 @@ def analyze_route(request: RouteRequest):
                 "traffic_condition": traffic_condition,
 
                 "traffic_score": traffic_score,
+
+                "via_route": route.get("via_route", ""),
 
                 "darkest_point_score": (
                     route_darkest.get("light_score")
