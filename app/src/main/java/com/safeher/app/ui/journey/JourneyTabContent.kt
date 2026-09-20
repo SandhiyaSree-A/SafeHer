@@ -22,16 +22,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.LatLngBounds
-import com.google.maps.android.compose.*
 import com.safeher.app.data.model.LocationData
 import com.safeher.app.data.model.RouteOption
+import com.safeher.app.data.model.RoutePoint
 import com.safeher.app.data.model.SafetiPinMetrics
 import com.safeher.app.data.model.User
+import com.safeher.app.ui.map.MapMarker
+import com.safeher.app.ui.map.MarkerKind
+import com.safeher.app.ui.map.SafeHerMap
 import com.safeher.app.ui.sos.SosViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,33 +51,21 @@ fun JourneyTabContent(
 
     var searchInput by remember { mutableStateOf(uiState.searchQuery) }
 
-    val originLatLng = remember(uiState.originLat, uiState.originLng) {
-        LatLng(uiState.originLat, uiState.originLng)
+    val trail = remember { mutableStateListOf<RoutePoint>() }
+    LaunchedEffect(uiState.currentPingLat, uiState.currentPingLng, uiState.isJourneyActive) {
+        if (!uiState.isJourneyActive) trail.clear()
+        else if (uiState.currentPingLat != 0.0) trail.add(RoutePoint(uiState.currentPingLat, uiState.currentPingLng))
     }
-
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(originLatLng, 13f)
-    }
-
-    // Auto center map camera to fit full route polylines when destination or routes change
-    LaunchedEffect(uiState.destLat, uiState.destLng, uiState.routes) {
-        if (uiState.destLat != 0.0 && uiState.destLng != 0.0) {
-            val selected = uiState.selectedRoute ?: uiState.routes.firstOrNull()
-            if (selected != null && selected.points.isNotEmpty()) {
-                val builder = com.google.android.gms.maps.model.LatLngBounds.builder()
-                selected.points.forEach { builder.include(LatLng(it.lat, it.lng)) }
-                if (uiState.originLat != 0.0 && uiState.originLat != selected.points.first().lat) {
-                    builder.include(LatLng(uiState.originLat, uiState.originLng))
-                }
-                val bounds = builder.build()
-                try {
-                    cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 100))
-                } catch (e: Exception) {
-                    cameraPositionState.position = CameraPosition.fromLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 13.5f)
-                }
-            } else {
-                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(uiState.destLat, uiState.destLng), 14f))
-            }
+    val mapMarkers = remember(uiState) {
+        buildList {
+            if (!uiState.isJourneyActive && uiState.originLat != 0.0)
+                add(MapMarker(uiState.originLat, uiState.originLng, MarkerKind.ORIGIN))
+            if (uiState.isJourneyActive && uiState.currentPingLat != 0.0)
+                add(MapMarker(uiState.currentPingLat, uiState.currentPingLng,
+                    if (uiState.isDeviated) MarkerKind.LIVE_OFF_ROUTE else MarkerKind.LIVE))
+            if (uiState.destLat != 0.0 && (uiState.routes.isNotEmpty() || uiState.activeJourney != null))
+                add(MapMarker(uiState.destLat, uiState.destLng, MarkerKind.DESTINATION))
+            uiState.routes.forEach { r -> r.darkSpots.forEach { add(MapMarker(it.lat, it.lng, MarkerKind.DARK_SPOT)) } }
         }
     }
 
@@ -283,74 +269,18 @@ fun JourneyTabContent(
                 .fillMaxWidth()
                 .weight(1.0f)
         ) {
-            GoogleMap(
+            SafeHerMap(
                 modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                uiSettings = MapUiSettings(zoomControlsEnabled = true)
-            ) {
-                // Origin Marker
-                Marker(
-                    state = MarkerState(position = originLatLng),
-                    title = "Origin Location",
-                    snippet = "Start Location",
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
-                )
-
-                // Live Active Location Pin
-                if (uiState.isJourneyActive && uiState.currentPingLat != 0.0) {
-                    val currentPingLatLng = LatLng(uiState.currentPingLat, uiState.currentPingLng)
-                    Marker(
-                        state = MarkerState(position = currentPingLatLng),
-                        title = "Live GPS Location",
-                        snippet = if (uiState.isDeviated) "⚠️ Off Route Path" else "✓ On Route Path",
-                        icon = BitmapDescriptorFactory.defaultMarker(
-                            if (uiState.isDeviated) BitmapDescriptorFactory.HUE_ORANGE else BitmapDescriptorFactory.HUE_GREEN
-                        )
-                    )
+                routes = uiState.routes,
+                selectedRouteId = uiState.selectedRoute?.routeId,
+                markers = mapMarkers,
+                trail = trail,
+                followPoint = if (uiState.isJourneyActive && uiState.currentPingLat != 0.0)
+                    RoutePoint(uiState.currentPingLat, uiState.currentPingLng) else null,
+                onRouteClick = { id ->
+                    if (!uiState.isJourneyActive) uiState.routes.firstOrNull { it.routeId == id }?.let { viewModel.selectRoute(it) }
                 }
-
-                // Destination Marker
-                if (uiState.routes.isNotEmpty() || uiState.activeJourney != null) {
-                    val destLatLng = LatLng(uiState.destLat, uiState.destLng)
-                    Marker(
-                        state = MarkerState(position = destLatLng),
-                        title = "Destination",
-                        snippet = uiState.destinationAddress,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                    )
-                }
-
-                // Dark Spot Warning Markers on Map
-                uiState.routes.forEach { route ->
-                    route.darkSpots.forEach { spot ->
-                        Marker(
-                            state = MarkerState(position = LatLng(spot.lat, spot.lng)),
-                            title = "⚠️ Low Light Hazard",
-                            snippet = "Caution: Low ambient lighting along ${route.name}",
-                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_VIOLET)
-                        )
-                    }
-                }
-
-                // Route Polylines
-                uiState.routes.forEachIndexed { index, route ->
-                    val isSelected = (route.routeId == uiState.selectedRoute?.routeId)
-                    val points = route.points.map { LatLng(it.lat, it.lng) }
-
-                    val polylineColor = when (index) {
-                        0 -> Color(0xFF00E676) // Bright Vibrant Emerald Green for Safest
-                        1 -> Color(0xFFFFB300) // Amber Yellow for Moderate
-                        else -> Color(0xFFFF5252) // Red for High Risk
-                    }
-
-                    Polyline(
-                        points = points,
-                        color = if (isSelected) polylineColor else polylineColor.copy(alpha = 0.4f),
-                        width = if (isSelected) 16f else 9f,
-                        onClick = { if (!uiState.isJourneyActive) viewModel.selectRoute(route) }
-                    )
-                }
-            }
+            )
 
             if (uiState.isLoading) {
                 CircularProgressIndicator(

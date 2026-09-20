@@ -58,7 +58,7 @@ class RouteScoringRepository {
 
             // STEP 2: Handle missing/uninitialized or far-away origin coordinates (e.g. 0,0 or default US coordinates)
             val approxDistToDest = Math.hypot(destLat - originLat, destLng - originLng) * 111.0
-            val (effectiveOriginLat, effectiveOriginLng) = if (originLat == 0.0 || originLng == 0.0 || approxDistToDest > 80.0) {
+            val (effectiveOriginLat, effectiveOriginLng) = if (originLat == 0.0 || originLng == 0.0) {
                 // Infer origin ~4 km southwest of destination in the same local city region
                 Pair(destLat - 0.035, destLng - 0.025)
             } else {

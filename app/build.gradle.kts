@@ -14,6 +14,7 @@ if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 val mapsApiKey = localProperties.getProperty("MAPS_API_KEY") ?: "YOUR_GOOGLE_MAPS_API_KEY_HERE"
+val mapTilerKey = localProperties.getProperty("MAPTILER_API_KEY") ?: ""
 
 android {
     namespace = "com.safeher.app"
@@ -28,6 +29,7 @@ android {
 
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
+        buildConfigField("String", "MAPTILER_API_KEY", "\"$mapTilerKey\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -84,6 +86,7 @@ dependencies {
     implementation(libs.play.services.maps)
     implementation(libs.maps.compose)
     implementation(libs.maps.utils)
+    implementation("org.maplibre.gl:android-sdk:11.11.0")
 
     // Room Database & WorkManager for Offline Queue & Sync
     implementation(libs.room.runtime)

@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -24,16 +27,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var locationJob: Job? = null
 
     fun startLocationUpdates(userUid: String) {
-        if (locationJob != null && locationJob?.isActive == true) return
-        _isTrackingActive.value = true
+    if (!hasLocationPermission()) return
+    if (locationJob?.isActive == true) return
+    _isTrackingActive.value = true
 
-        locationJob = viewModelScope.launch {
+    locationJob = viewModelScope.launch {
+        launch {   // instant first fix
+            repository.getFreshLocation()?.let { fix ->
+                if (_currentLocation.value == null) {
+                    _currentLocation.value = fix
+                    repository.updateFirestoreLocation(userUid, fix)
+                }
+            }
+        }
+        try {      // then continuous real-time updates
             repository.getLocationUpdates().collect { locationData ->
                 _currentLocation.value = locationData
                 repository.updateFirestoreLocation(userUid, locationData)
             }
+        } catch (e: SecurityException) {
+            _isTrackingActive.value = false
         }
     }
+}
+
+private fun hasLocationPermission(): Boolean {
+    val app = getApplication<Application>()
+    return ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+}
 
     fun stopLocationUpdates() {
         locationJob?.cancel()

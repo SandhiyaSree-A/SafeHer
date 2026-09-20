@@ -13,6 +13,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import com.google.android.gms.tasks.CancellationTokenSource
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
+
+@SuppressLint("MissingPermission")
+suspend fun getFreshLocation(fusedLocationClient: FusedLocationProviderClient): LocationData? {
+    return try {
+        val loc = withTimeoutOrNull(8_000L) {
+            fusedLocationClient.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token
+            ).await()
+        } ?: fusedLocationClient.lastLocation.await()
+        loc?.let { LocationData(lat = it.latitude, lng = it.longitude, updatedAt = System.currentTimeMillis()) }
+    } catch (e: Exception) { null }
+}
 
 class LocationRepository(
     private val context: Context,
@@ -72,5 +87,22 @@ class LocationRepository(
                 onFailure(error)
             }
         }
+    }
+
+    /** Returns the best available current location, or null if unavailable. */
+    @SuppressLint("MissingPermission")
+    suspend fun getCurrentLocation(): LocationData? = getFreshLocation()
+
+    /** Alias used by HomeViewModel – delegates to getCurrentLocation(). */
+    @SuppressLint("MissingPermission")
+    suspend fun getFreshLocation(): LocationData? {
+        return try {
+            val loc = withTimeoutOrNull(8_000L) {
+                fusedLocationClient.getCurrentLocation(
+                    Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token
+                ).await()
+            } ?: fusedLocationClient.lastLocation.await()
+            loc?.let { LocationData(lat = it.latitude, lng = it.longitude, updatedAt = System.currentTimeMillis()) }
+        } catch (e: Exception) { null }
     }
 }

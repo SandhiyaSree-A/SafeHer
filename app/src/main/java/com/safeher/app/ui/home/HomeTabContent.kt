@@ -20,11 +20,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.*
+import com.safeher.app.data.model.RoutePoint
 import com.safeher.app.data.model.User
+import com.safeher.app.ui.map.MapMarker
+import com.safeher.app.ui.map.MarkerKind
+import com.safeher.app.ui.map.SafeHerMap
 
 @Composable
 fun HomeTabContent(
@@ -69,21 +69,6 @@ fun HomeTabContent(
         }
     }
 
-    // Default target LatLng
-    val targetLatLng = currentLocation?.let { LatLng(it.lat, it.lng) } ?: LatLng(37.7749, -122.4194)
-
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(targetLatLng, 15f)
-    }
-
-    LaunchedEffect(currentLocation) {
-        currentLocation?.let { loc ->
-            cameraPositionState.animate(
-                CameraUpdateFactory.newLatLngZoom(LatLng(loc.lat, loc.lng), 16f)
-            )
-        }
-    }
-
     if (showRationaleDialog) {
         AlertDialog(
             onDismissRequest = { showRationaleDialog = false },
@@ -121,22 +106,14 @@ fun HomeTabContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (hasLocationPermission) {
-            GoogleMap(
+            SafeHerMap(
                 modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                uiSettings = MapUiSettings(
-                    zoomControlsEnabled = true,
-                    myLocationButtonEnabled = true
-                )
-            ) {
-                currentLocation?.let { loc ->
-                    Marker(
-                        state = MarkerState(position = LatLng(loc.lat, loc.lng)),
-                        title = "${user.name}'s Location",
-                        snippet = "Lat: ${String.format("%.4f", loc.lat)}, Lng: ${String.format("%.4f", loc.lng)}"
-                    )
-                }
-            }
+                routes = emptyList(),
+                selectedRouteId = null,
+                markers = listOfNotNull(currentLocation?.let { MapMarker(it.lat, it.lng, MarkerKind.LIVE) }),
+                trail = emptyList(),
+                followPoint = currentLocation?.let { RoutePoint(it.lat, it.lng) }
+            )
         } else {
             Column(
                 modifier = Modifier

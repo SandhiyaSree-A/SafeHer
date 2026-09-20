@@ -24,6 +24,7 @@ import com.safeher.app.MainActivity
 import com.safeher.app.data.model.EmergencyContact
 import com.safeher.app.data.model.Journey
 import com.safeher.app.data.offline.OfflineSyncRepository
+import com.safeher.app.util.RouteCache
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import java.net.URL
@@ -129,17 +130,23 @@ class JourneyMonitoringService : Service() {
 
     private fun loadJourneyRouteAndStartTracking(journeyId: String) {
         serviceScope.launch {
-            try {
-                val doc = firestore.collection("journeys").document(journeyId).get().await()
-                if (doc.exists()) {
-                    val journey = doc.toObject(Journey::class.java)
-                    if (journey != null) {
-                        routePoints = journey.polylinePoints.map { LatLng(it.lat, it.lng) }
-                        Log.d("JourneyService", "Loaded ${routePoints.size} polyline points for journey $journeyId")
+            val cached = RouteCache.load(this@JourneyMonitoringService, journeyId)
+            if (cached.isNotEmpty()) {
+                routePoints = cached.map { LatLng(it.lat, it.lng) }
+                Log.d("JourneyService", "Loaded ${routePoints.size} route points from cache for $journeyId")
+            } else {
+                try {
+                    val doc = firestore.collection("journeys").document(journeyId).get().await()
+                    if (doc.exists()) {
+                        val journey = doc.toObject(Journey::class.java)
+                        if (journey != null) {
+                            routePoints = journey.polylinePoints.map { LatLng(it.lat, it.lng) }
+                            Log.d("JourneyService", "Loaded ${routePoints.size} polyline points for journey $journeyId")
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e("JourneyService", "Error loading journey doc: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("JourneyService", "Error loading journey doc: ${e.message}")
             }
 
             withContext(Dispatchers.Main) {

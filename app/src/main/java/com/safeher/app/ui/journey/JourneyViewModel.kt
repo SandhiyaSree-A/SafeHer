@@ -9,11 +9,14 @@ import com.safeher.app.data.model.Journey
 import com.safeher.app.data.model.RouteOption
 import com.safeher.app.data.model.RouteTurnStep
 import com.safeher.app.data.repository.RouteScoringRepository
+import com.safeher.app.util.RouteCache
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class JourneyUiState(
     val searchQuery: String = "",
@@ -164,6 +167,9 @@ class JourneyViewModel(
         val journeyId = _uiState.value.savedJourneyId ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
+            _uiState.value.selectedRoute?.let { route ->
+                withContext(Dispatchers.IO) { RouteCache.save(context, journeyId, route.points) }
+            }
             val result = repository.startActiveJourney(journeyId, userId, context)
             result.fold(
                 onSuccess = {

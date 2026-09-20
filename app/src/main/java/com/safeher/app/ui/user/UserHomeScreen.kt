@@ -1,6 +1,8 @@
 package com.safeher.app.ui.user
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
@@ -130,6 +132,7 @@ fun UserHomeScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
                                     .padding(16.dp)
                             ) {
                                 Card(
@@ -164,7 +167,9 @@ fun UserHomeScreen(
                                     viewModel = profileViewModel
                                 )
 
-                                Spacer(modifier = Modifier.weight(1f))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                com.safeher.app.ui.map.OfflineMapCard()
+                                Spacer(modifier = Modifier.height(16.dp))
 
                                 Button(
                                     onClick = onSignOut,

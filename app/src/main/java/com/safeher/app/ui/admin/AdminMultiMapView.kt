@@ -21,7 +21,7 @@ fun AdminMultiMapView(
     val defaultCenter = if (alerts.isNotEmpty()) {
         LatLng(alerts.first().lat, alerts.first().lng)
     } else {
-        LatLng(37.7749, -122.4194)
+        LatLng(13.0827, 80.2707)
     }
 
     val cameraPositionState = rememberCameraPositionState {

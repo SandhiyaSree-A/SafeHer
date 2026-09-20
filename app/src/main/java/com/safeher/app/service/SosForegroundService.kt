@@ -16,6 +16,9 @@ import com.safeher.app.data.repository.SosRepository
 import com.safeher.app.data.offline.ConnectivityRepository
 import com.google.firebase.firestore.Source
 import kotlinx.coroutines.*
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+
 
 class SosForegroundService : Service() {
 
@@ -65,18 +68,18 @@ class SosForegroundService : Service() {
         if (userId.isBlank()) return
 
         val locationClient = LocationServices.getFusedLocationProviderClient(this)
-        var lat = 37.7749
-        var lng = -122.4194
-
-        try {
-            val lastLoc = locationClient.lastLocation.awaitResult()
-            if (lastLoc != null) {
-                lat = lastLoc.latitude
-                lng = lastLoc.longitude
-            }
-        } catch (e: Exception) {
-            // Fallback to default coordinates if location fix fails
-        }
+        var lat = 0.0
+var lng = 0.0
+var hasFix = false
+try {
+    val fresh = withTimeoutOrNull(5_000L) {
+        locationClient.getCurrentLocation(
+            Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token
+        ).awaitResult()
+    }
+    val loc = fresh ?: locationClient.lastLocation.awaitResult()
+    if (loc != null) { lat = loc.latitude; lng = loc.longitude; hasFix = true }
+} catch (e: Exception) { }
 
         val sosRepository = SosRepository()
         sosRepository.createSosAlert(
@@ -109,7 +112,8 @@ class SosForegroundService : Service() {
             }
                 .awaitResult()
 
-            val smsMessage = "SOS EMERGENCY: $userName needs immediate help! Location: https://maps.google.com/?q=$lat,$lng . Sent via SafeHer."
+val locationText = if (hasFix) "Location: https://maps.google.com/?q=$lat,$lng ." else "Location unavailable (no GPS fix)."
+val smsMessage = "SOS EMERGENCY: $userName needs immediate help! $locationText Sent via SafeHer."
 
             contactsSnapshot?.documents?.forEach { doc ->
                 val phone = doc.getString("phone") ?: ""
