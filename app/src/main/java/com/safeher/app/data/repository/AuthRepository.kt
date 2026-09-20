@@ -21,17 +21,17 @@ class AuthRepository(
 
     companion object {
         const val GENERIC_AUTH_ERROR = "Invalid name or password"
+    }
 
-        /** Really verifies the OTP with Firebase. Signs the user in with the phone credential. */
-fun signInWithPhoneCredential(
-    credential: PhoneAuthCredential,
-    onSuccess: () -> Unit,
-    onFailure: (Exception) -> Unit
-) {
-    auth.signInWithCredential(credential)
-        .addOnSuccessListener { onSuccess() }
-        .addOnFailureListener(onFailure)
-}
+    /** Verifies the OTP with Firebase and signs the user in with the phone credential. */
+    fun signInWithPhoneCredential(
+        credential: PhoneAuthCredential,
+        onSuccess: () -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        auth.signInWithCredential(credential)
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener(onFailure)
     }
 
     fun getCurrentUser() = auth.currentUser
@@ -298,6 +298,13 @@ fun signInWithPhoneCredential(
 
     fun signOut() {
         auth.signOut()
+    }
+
+    /** Derives a stable, unique email from a normalized phone number for Firebase Email auth. */
+    private fun generateSyntheticEmail(normalizedPhone: String): String {
+        // Strip the leading '+' and append a fixed domain so Firebase accepts it as an email.
+        val digits = normalizedPhone.filter { it.isDigit() }
+        return "user_$digits@safeher.app"
     }
 }
 
