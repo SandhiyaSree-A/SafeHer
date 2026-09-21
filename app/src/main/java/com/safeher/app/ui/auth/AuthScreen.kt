@@ -36,7 +36,9 @@ fun AuthScreen(
     val otpCode by viewModel.otpCode.collectAsState()
     val disambiguationPhone by viewModel.disambiguationPhone.collectAsState()
     val otpError by viewModel.otpError.collectAsState()
-val isVerifyingOtp by viewModel.isVerifyingOtp.collectAsState()
+    val isVerifyingOtp by viewModel.isVerifyingOtp.collectAsState()
+    var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
     LaunchedEffect(uiState) {
         if (uiState is AuthUiState.Success) {
             onAuthSuccess((uiState as AuthUiState.Success).user)
@@ -157,7 +159,18 @@ val isVerifyingOtp by viewModel.isVerifyingOtp.collectAsState()
                         onValueChange = { viewModel.updatePassword(it) },
                         label = { Text("Password") },
                         leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Password") },
-                        visualTransformation = PasswordVisualTransformation(),
+                        trailingIcon = {
+                            val image = if (passwordVisible)
+                                Icons.Filled.Visibility
+                            else Icons.Filled.VisibilityOff
+
+                            val description = if (passwordVisible) "Hide password" else "Show password"
+
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(imageVector = image, contentDescription = description)
+                            }
+                        },
+                        visualTransformation = if (passwordVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         singleLine = true,
                         modifier = Modifier
@@ -238,7 +251,18 @@ val isVerifyingOtp by viewModel.isVerifyingOtp.collectAsState()
                                 onValueChange = { viewModel.updatePassword(it) },
                                 label = { Text("Create Password (min. 6 chars)") },
                                 leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Password") },
-                                visualTransformation = PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    val image = if (passwordVisible)
+                                        Icons.Filled.Visibility
+                                    else Icons.Filled.VisibilityOff
+
+                                    val description = if (passwordVisible) "Hide password" else "Show password"
+
+                                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                        Icon(imageVector = image, contentDescription = description)
+                                    }
+                                },
+                                visualTransformation = if (passwordVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                 singleLine = true,
                                 modifier = Modifier
@@ -251,7 +275,18 @@ val isVerifyingOtp by viewModel.isVerifyingOtp.collectAsState()
                                 onValueChange = { viewModel.updateConfirmPassword(it) },
                                 label = { Text("Confirm Password") },
                                 leadingIcon = { Icon(Icons.Default.Check, contentDescription = "Confirm Password") },
-                                visualTransformation = PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    val image = if (confirmPasswordVisible)
+                                        Icons.Filled.Visibility
+                                    else Icons.Filled.VisibilityOff
+
+                                    val description = if (confirmPasswordVisible) "Hide password" else "Show password"
+
+                                    IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
+                                        Icon(imageVector = image, contentDescription = description)
+                                    }
+                                },
+                                visualTransformation = if (confirmPasswordVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                 singleLine = true,
                                 modifier = Modifier
