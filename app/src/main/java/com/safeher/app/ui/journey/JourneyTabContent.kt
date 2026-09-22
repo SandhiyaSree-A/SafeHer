@@ -196,63 +196,26 @@ fun JourneyTabContent(
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
-
-                    var expanded by remember { mutableStateOf(false) }
-                    val suggestions = listOf(
-                        "Central Railway Station", 
-                        "Phoenix Marketcity Mall", 
-                        "Apollo Hospital Main", 
-                        "Airport Terminal 1", 
-                        "Tidel Park IT SEZ"
-                    ).filter { it.contains(searchInput, ignoreCase = true) }
-
+                    
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        ExposedDropdownMenuBox(
-                            expanded = expanded,
-                            onExpandedChange = { expanded = !expanded },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            OutlinedTextField(
-                                value = searchInput,
-                                onValueChange = {
-                                    searchInput = it
-                                    viewModel.updateSearchQuery(it)
-                                    expanded = true
-                                },
-                                placeholder = { Text("Enter exact address or place...") },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                                modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                singleLine = true
-                            )
-                            
-                            if (suggestions.isNotEmpty() && searchInput.isNotBlank()) {
-                                ExposedDropdownMenu(
-                                    expanded = expanded,
-                                    onDismissRequest = { expanded = false }
-                                ) {
-                                    suggestions.forEach { suggestion ->
-                                        DropdownMenuItem(
-                                            text = { Text(suggestion) },
-                                            onClick = {
-                                                searchInput = suggestion
-                                                viewModel.updateSearchQuery(suggestion)
-                                                expanded = false
-                                                viewModel.searchAndScoreRoutes(suggestion)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        OutlinedTextField(
+                            value = searchInput,
+                            onValueChange = {
+                                searchInput = it
+                                viewModel.updateSearchQuery(it)
+                            },
+                            placeholder = { Text("Enter exact address or place...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            singleLine = true
+                        )
                         
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = { 
-                                expanded = false
                                 viewModel.searchAndScoreRoutes(searchInput) 
                             },
                             modifier = Modifier.height(56.dp)
@@ -528,7 +491,7 @@ fun RouteCardItem(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Light: ${(route.lightingScore * 100).toInt()}%",
+                    text = "Light: ${(route.lightingScore).toInt()}",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.outline
@@ -543,13 +506,24 @@ fun RouteCardItem(
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier.padding(6.dp),
-                    horizontalArrangement = Arrangement.SpaceAround
-                ) {
-                    Text("💡 Light: ${(route.lightingScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    Text("🚶 Crowd: ${(route.trafficScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    Text("🚗 Traffic: ${(route.trafficScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                Column(modifier = Modifier.padding(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("💡 Light: ${(route.lightingScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("👥 Human: ${(route.humanPresenceScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("🏪 Activity: ${(route.activityDensityScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("🚗 Traffic: ${(route.trafficScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("🚶 Pedestrian: ${(route.pedestrianScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("🔍 Confidence: ${(route.confidenceScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
 

@@ -142,18 +142,19 @@ class RouteScoringRepository {
             val lightingNorm = lightingSafetyScore / 100.0
 
             val crowdDensityStr = route.optString("crowd_density", "Unknown")
-            val crowdScore = if (crowdDensityStr == "HIGH") 0.95 else if (crowdDensityStr == "MEDIUM") 0.65 else 0.35
-            
             val trafficCond = route.optString("traffic_condition", "Unknown Traffic")
-            val trafficScore = route.optDouble("traffic_score", 0.50)
+            val trafficScore = route.optDouble("traffic_score", 0.0)
+            val humanPresenceScore = route.optDouble("human_presence_score", 0.0)
+            val activityDensityScore = route.optDouble("activity_density_score", 0.0)
+            val pedestrianScore = route.optDouble("pedestrian_score", 0.0)
+            val confidenceScore = route.optDouble("confidence_score", 1.0)
+            val compositeScore = route.optDouble("composite_score", 0.0)
 
-            // Weighted Composite Safety Score (45% Lighting + 35% Crowd + 20% Traffic)
-            val compositeScore = (0.45 * lightingNorm + 0.35 * crowdScore + 0.20 * trafficScore).coerceIn(0.10, 0.99)
             val roundedScore = (Math.round(compositeScore * 100.0) / 100.0)
 
             val displayRisk = when {
-                compositeScore >= 0.75 -> "Low Risk (Safest)"
-                compositeScore >= 0.50 -> "Medium Risk"
+                compositeScore >= 75.0 -> "Low Risk (Safest)"
+                compositeScore >= 50.0 -> "Medium Risk"
                 else -> "High Risk"
             }
 
@@ -175,12 +176,16 @@ class RouteScoringRepository {
                     distance = "${route.getDouble("distance_km")} km",
                     duration = "${route.getDouble("duration_minutes").toInt()} mins",
                     compositeScore = roundedScore,
-                    modelRiskLabel = if (compositeScore >= 0.75) "low" else if (compositeScore >= 0.50) "medium" else "high",
+                    modelRiskLabel = if (compositeScore >= 75.0) "low" else if (compositeScore >= 50.0) "medium" else "high",
                     displayRisk = displayRisk,
-                    lightingScore = averageLightScore / 100.0,
+                    lightingScore = averageLightScore,
                     crowdDensity = crowdDensityStr,
                     trafficCondition = trafficCond,
                     trafficScore = trafficScore,
+                    humanPresenceScore = humanPresenceScore,
+                    activityDensityScore = activityDensityScore,
+                    pedestrianScore = pedestrianScore,
+                    confidenceScore = confidenceScore,
                     darkSpots = darkSpots,
                     points = points
                 )

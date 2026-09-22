@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.services.routing_service import get_routes
-from app.services.safe_route_service import analyze_routes
+from app.services.route_safety_score_service import analyze_multi_factor_routes
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -295,69 +295,39 @@ def analyze_route(request: RouteRequest):
 
             route_id = route["route_id"]
             
-            # Real-time traffic scoring
-            duration = route.get("duration_seconds", 1)
-            duration_traffic = route.get("duration_in_traffic_seconds", duration)
+            factors = route.get("factors", {})
             
-            # If duration in traffic is much higher than free flow, it's congested.
-            traffic_ratio = duration_traffic / max(duration, 1)
-            
-            if traffic_ratio <= 1.05:
-                traffic_condition = "Smooth Traffic"
-                traffic_score = 0.90
-            elif traffic_ratio <= 1.25:
-                traffic_condition = "Moderate Traffic"
-                traffic_score = 0.65
-            else:
-                traffic_condition = "Congested Traffic"
-                traffic_score = 0.40
+            traffic_score = factors.get("traffic_score") or 0
+            human_score = factors.get("human_presence_score") or 0
+            activity_score = factors.get("activity_density_score") or 0
+            pedestrian_score = factors.get("pedestrian_score") or 0
+            confidence = factors.get("confidence") or 1.0
+            composite = factors.get("final_safety_score") or 0
 
-            # Proxied crowd density based on route ranking and traffic
-            crowd_density = "HIGH" if route_id == result["safest_route_id"] else ("MEDIUM" if traffic_score > 0.5 else "LOW")
+            # Proxied textual condition
+            traffic_condition = "Smooth Traffic" if traffic_score > 60 else ("Moderate Traffic" if traffic_score > 30 else "Congested Traffic")
+            crowd_density = "HIGH" if human_score > 60 else ("MEDIUM" if human_score > 30 else "LOW")
 
             all_routes.append({
-
                 "route_id": route["route_id"],
-
-                "distance_km": round(
-                    route["distance_meters"] / 1000,
-                    2
-                ),
-
-                "duration_minutes": round(
-                    route["duration_seconds"] / 60,
-                    2
-                ),
-
-                "lighting_safety_score": route_safety.get(
-                    "lighting_safety_score",
-                    0
-                ),
-
-                "average_light_score": route_lighting.get(
-                    "average_light_score",
-                    0
-                ),
-
+                "distance_km": round(route["distance_meters"] / 1000, 2),
+                "duration_minutes": round(route["duration_seconds"] / 60, 2),
+                "lighting_safety_score": route_safety.get("lighting_safety_score", 0),
+                "average_light_score": route_lighting.get("average_light_score", 0),
                 "crowd_density": crowd_density,
-
                 "traffic_condition": traffic_condition,
-
+                
+                # New factors
                 "traffic_score": traffic_score,
+                "human_presence_score": human_score,
+                "activity_density_score": activity_score,
+                "pedestrian_score": pedestrian_score,
+                "confidence_score": confidence,
+                "composite_score": composite,
 
                 "via_route": route.get("via_route", ""),
-
-                "darkest_point_score": (
-                    route_darkest.get("light_score")
-                    if route_darkest
-                    else None
-                ),
-
-                # Route coordinates for map
-                "coordinates": route.get(
-                    "coordinates",
-                    []
-                )
+                "darkest_point_score": route_darkest.get("light_score") if route_darkest else None,
+                "coordinates": route.get("coordinates", [])
             })
 
         # ----------------------------------
