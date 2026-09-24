@@ -1,19 +1,15 @@
 package com.safeher.app.ui.map
 
-import android.annotation.SuppressLint
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.Color
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
+import com.google.maps.android.compose.*
 import com.safeher.app.data.model.RouteOption
 import com.safeher.app.data.model.RoutePoint
-import org.maplibre.android.MapLibre
-import org.maplibre.android.camera.CameraPosition
-import org.maplibre.android.camera.CameraUpdateFactory
-import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.geometry.LatLngBounds
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.MapLibreMap
-import org.maplibre.android.maps.Style
 
 // --- Data types consumed by SafeHerMap ---
 
@@ -33,23 +29,39 @@ data class MapMarker(
 
 // --- Route color helpers ---
 
-private fun routeColor(index: Int): String = when (index) {
-    0 -> "#00E676"   // Safest – bright green
-    1 -> "#FFB300"   // Moderate – amber
-    else -> "#FF5252" // High risk – red
+private fun routeColor(index: Int): Color = when (index) {
+    0 -> Color(0xFF00E676)   // Safest – bright green
+    1 -> Color(0xFFFFB300)   // Moderate – amber
+    else -> Color(0xFFFF5252) // High risk – red
+}
+
+private fun markerHue(kind: MarkerKind): Float = when (kind) {
+    MarkerKind.ORIGIN -> BitmapDescriptorFactory.HUE_AZURE
+    MarkerKind.DESTINATION -> BitmapDescriptorFactory.HUE_RED
+    MarkerKind.LIVE -> BitmapDescriptorFactory.HUE_GREEN
+    MarkerKind.LIVE_OFF_ROUTE -> BitmapDescriptorFactory.HUE_ORANGE
+    MarkerKind.DARK_SPOT -> BitmapDescriptorFactory.HUE_VIOLET
+}
+
+private fun markerTitle(kind: MarkerKind): String = when (kind) {
+    MarkerKind.ORIGIN -> "Start"
+    MarkerKind.DESTINATION -> "Destination"
+    MarkerKind.LIVE -> "You are here"
+    MarkerKind.LIVE_OFF_ROUTE -> "⚠️ Off Route"
+    MarkerKind.DARK_SPOT -> "⚠️ Dark Spot"
 }
 
 /**
- * MapLibre-backed map composable that replaces the Google Maps GoogleMap composable.
+ * Google Maps–backed map composable (replaces the earlier MapLibre/MapTiler
+ * implementation) so routes render on real Google road/satellite tiles and
+ * benefit from the same MAPS_API_KEY already used on the Admin screens.
  *
- * Parameters mirror what JourneyTabContent and HomeTabContent need:
  *  - routes / selectedRouteId   → polylines with colour coding
  *  - markers                    → origin, destination, live, dark-spot pins
  *  - trail                      → live breadcrumb polyline drawn in blue
  *  - followPoint                → if set the camera tracks this coordinate
- *  - onRouteClick               → invoked when the user taps a route polyline
+ *  - onRouteClick                → invoked when the user taps a route polyline
  */
-@SuppressLint("MissingPermission")
 @Composable
 fun SafeHerMap(
     modifier: Modifier = Modifier,
@@ -60,178 +72,92 @@ fun SafeHerMap(
     followPoint: RoutePoint? = null,
     onRouteClick: (String) -> Unit = {}
 ) {
-    val mapViewRef = remember { mutableStateOf<MapView?>(null) }
-    val mapRef = remember { mutableStateOf<MapLibreMap?>(null) }
-    val styleReady = remember { mutableStateOf(false) }
-
-    // Obtain a stable context ref inside the composable lifecycle
-    AndroidView(
-        modifier = modifier,
-        factory = { ctx ->
-            // MapLibre must be initialised before any MapView is created.
-            MapLibre.getInstance(ctx)
-            val mv = MapView(ctx)
-            mapViewRef.value = mv
-            mv.onCreate(null)
-            mv.getMapAsync { map ->
-                mapRef.value = map
-                map.setStyle(MapConfig.styleUrl) {
-                    styleReady.value = true
-                }
-            }
-            mv
-        },
-        update = { _ -> /* handled via side-effects below */ }
-    )
-
-    // Re-draw whenever data changes (after style is ready)
-    LaunchedEffect(styleReady.value, routes, selectedRouteId, markers, trail) {
-        val map = mapRef.value ?: return@LaunchedEffect
-        if (!styleReady.value) return@LaunchedEffect
-        drawMapContent(map, routes, selectedRouteId, markers, trail, onRouteClick)
+    val defaultCenter = LatLng(13.0827, 80.2707) // Chennai fallback until data arrives
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(defaultCenter, 13f)
     }
 
-    // Camera follow
+    // Fit camera to the selected (or first) route's bounds whenever routes change.
+    LaunchedEffect(routes, selectedRouteId) {
+        val activeRoute = routes.firstOrNull { it.routeId == selectedRouteId } ?: routes.firstOrNull()
+        val pts = activeRoute?.points
+        if (pts != null && pts.size >= 2) {
+            try {
+                val boundsBuilder = LatLngBounds.Builder()
+                pts.forEach { boundsBuilder.include(LatLng(it.lat, it.lng)) }
+                cameraPositionState.animate(
+                    update = com.google.android.gms.maps.CameraUpdateFactory
+                        .newLatLngBounds(boundsBuilder.build(), 100),
+                    durationMs = 700
+                )
+            } catch (_: Exception) {
+                pts.lastOrNull()?.let {
+                    cameraPositionState.animate(
+                        update = com.google.android.gms.maps.CameraUpdateFactory
+                            .newLatLngZoom(LatLng(it.lat, it.lng), 13f)
+                    )
+                }
+            }
+        } else if (markers.isNotEmpty()) {
+            val m = markers.first()
+            cameraPositionState.animate(
+                update = com.google.android.gms.maps.CameraUpdateFactory
+                    .newLatLngZoom(LatLng(m.lat, m.lng), 15f),
+                durationMs = 600
+            )
+        }
+    }
+
+    // Camera follow (navigation mode)
     LaunchedEffect(followPoint) {
-        val map = mapRef.value ?: return@LaunchedEffect
         followPoint?.let { pt ->
-            map.animateCamera(
-                CameraUpdateFactory.newCameraPosition(
+            cameraPositionState.animate(
+                update = com.google.android.gms.maps.CameraUpdateFactory.newCameraPosition(
                     CameraPosition.Builder()
                         .target(LatLng(pt.lat, pt.lng))
-                        .zoom(18.0) // Closer zoom for navigation
-                        .tilt(45.0) // 3D tilt for navigation driving feel
+                        .zoom(18f)
+                        .tilt(45f) // 3D tilt for navigation driving feel
                         .build()
                 ),
-                600
+                durationMs = 600
             )
         }
     }
 
-    // MapView lifecycle
-    DisposableEffect(Unit) {
-        mapViewRef.value?.onStart()
-        mapViewRef.value?.onResume()
-        onDispose {
-            mapViewRef.value?.onPause()
-            mapViewRef.value?.onStop()
-            mapViewRef.value?.onDestroy()
-        }
-    }
-}
-
-private fun drawMapContent(
-    map: MapLibreMap,
-    routes: List<RouteOption>,
-    selectedRouteId: String?,
-    markers: List<MapMarker>,
-    trail: List<RoutePoint>,
-    onRouteClick: (String) -> Unit
-) {
-    val style = map.style ?: return
-
-    // --- Fit camera to first route bounds when routes are available ---
-    if (routes.isNotEmpty()) {
-        val allPoints = routes.firstOrNull { it.routeId == selectedRouteId }?.points
-            ?: routes.first().points
-        if (allPoints.size >= 2) {
-            try {
-                val builder = LatLngBounds.Builder()
-                allPoints.forEach { builder.include(LatLng(it.lat, it.lng)) }
-                map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), 100), 700)
-            } catch (_: Exception) {
-                allPoints.lastOrNull()?.let {
-                    map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(it.lat, it.lng), 13.0))
-                }
-            }
-        }
-    } else if (markers.isNotEmpty()) {
-        val m = markers.first()
-        map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(m.lat, m.lng), 15.0), 600)
-    }
-
-    // --- Route polylines via the GeoJSON source / layer approach ---
-    // We use direct GeoJSON sources so we don't need the annotation plugin for lines.
-    // Remove old sources/layers first.
-    val layerPrefix = "safeher_route_"
-    val trailLayerId = "safeher_trail"
-    val trailSourceId = "safeher_trail_src"
-
-    // Remove previously added layers & sources
-    try {
-        style.layers.filter { it.id.startsWith(layerPrefix) || it.id == trailLayerId }
-            .forEach { style.removeLayer(it) }
-        style.sources.filter { it.id.startsWith(layerPrefix) || it.id == trailSourceId }
-            .forEach { style.removeSource(it) }
-    } catch (_: Exception) {}
-
-    // Add route polylines
-    routes.forEachIndexed { index, route ->
-        if (route.points.size < 2) return@forEachIndexed
-        val color = routeColor(index)
-        val isSelected = route.routeId == selectedRouteId
-        val lineWidth = if (isSelected) 6.0f else 3.5f
-        val opacity = if (isSelected) 1.0f else 0.4f
-
-        val coords = route.points.joinToString(",") { "[${it.lng},${it.lat}]" }
-        val geojson = """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[$coords]},"properties":{}}]}"""
-
-        val srcId = "${layerPrefix}src_${route.routeId}"
-        val layId = "${layerPrefix}${route.routeId}"
-        try {
-            val src = org.maplibre.android.style.sources.GeoJsonSource(srcId, geojson)
-            style.addSource(src)
-            val layer = org.maplibre.android.style.layers.LineLayer(layId, srcId).apply {
-                setProperties(
-                    org.maplibre.android.style.layers.PropertyFactory.lineColor(color),
-                    org.maplibre.android.style.layers.PropertyFactory.lineWidth(lineWidth),
-                    org.maplibre.android.style.layers.PropertyFactory.lineOpacity(opacity),
-                    org.maplibre.android.style.layers.PropertyFactory.lineCap(
-                        org.maplibre.android.style.layers.Property.LINE_CAP_ROUND
-                    ),
-                    org.maplibre.android.style.layers.PropertyFactory.lineJoin(
-                        org.maplibre.android.style.layers.Property.LINE_JOIN_ROUND
-                    )
-                )
-            }
-            style.addLayer(layer)
-        } catch (_: Exception) {}
-    }
-
-    // Trail (breadcrumb) line in blue
-    if (trail.size >= 2) {
-        val coords = trail.joinToString(",") { "[${it.lng},${it.lat}]" }
-        val geojson = """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[$coords]},"properties":{}}]}"""
-        try {
-            val src = org.maplibre.android.style.sources.GeoJsonSource(trailSourceId, geojson)
-            style.addSource(src)
-            val layer = org.maplibre.android.style.layers.LineLayer(trailLayerId, trailSourceId).apply {
-                setProperties(
-                    org.maplibre.android.style.layers.PropertyFactory.lineColor("#2196F3"),
-                    org.maplibre.android.style.layers.PropertyFactory.lineWidth(4.0f),
-                    org.maplibre.android.style.layers.PropertyFactory.lineCap(
-                        org.maplibre.android.style.layers.Property.LINE_CAP_ROUND
-                    )
-                )
-            }
-            style.addLayer(layer)
-        } catch (_: Exception) {}
-    }
-
-    // --- Markers via MapLibreMap.addMarker ---
-    map.markers.forEach { map.removeMarker(it) }
-    markers.forEach { m ->
-        val opts = org.maplibre.android.annotations.MarkerOptions()
-            .position(LatLng(m.lat, m.lng))
-            .title(
-                when (m.kind) {
-                    MarkerKind.ORIGIN -> "Start"
-                    MarkerKind.DESTINATION -> "Destination"
-                    MarkerKind.LIVE -> "You are here"
-                    MarkerKind.LIVE_OFF_ROUTE -> "⚠️ Off Route"
-                    MarkerKind.DARK_SPOT -> "⚠️ Dark Spot"
-                }
+    GoogleMap(
+        modifier = modifier,
+        cameraPositionState = cameraPositionState,
+        uiSettings = MapUiSettings(zoomControlsEnabled = true, myLocationButtonEnabled = false)
+    ) {
+        // Route polylines
+        routes.forEachIndexed { index, route ->
+            if (route.points.size < 2) return@forEachIndexed
+            val isSelected = route.routeId == selectedRouteId
+            Polyline(
+                points = route.points.map { LatLng(it.lat, it.lng) },
+                color = routeColor(index),
+                width = if (isSelected) 16f else 9f,
+                clickable = true,
+                onClick = { onRouteClick(route.routeId) }
             )
-        try { map.addMarker(opts) } catch (_: Exception) {}
+        }
+
+        // Trail (breadcrumb) line
+        if (trail.size >= 2) {
+            Polyline(
+                points = trail.map { LatLng(it.lat, it.lng) },
+                color = Color(0xFF2196F3),
+                width = 10f
+            )
+        }
+
+        // Markers
+        markers.forEach { m ->
+            Marker(
+                state = MarkerState(position = LatLng(m.lat, m.lng)),
+                title = markerTitle(m.kind),
+                icon = BitmapDescriptorFactory.defaultMarker(markerHue(m.kind))
+            )
+        }
     }
 }

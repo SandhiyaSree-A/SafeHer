@@ -3,14 +3,20 @@ import requests
 
 # Load Google Maps API Key from local.properties or env
 def get_maps_api_key():
-    key = os.environ.get("MAPS_API_KEY")
+    key = os.environ.get("SERVER_MAPS_API_KEY") or os.environ.get("MAPS_API_KEY")
     if key: return key
     try:
         # Check parent directories for local.properties
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
         with open(os.path.join(project_root, "local.properties"), "r") as f:
-            for line in f:
+            lines = f.readlines()
+            # Check for SERVER_MAPS_API_KEY first
+            for line in lines:
+                if line.startswith("SERVER_MAPS_API_KEY="):
+                    return line.split("=")[1].strip()
+            # Fallback to MAPS_API_KEY
+            for line in lines:
                 if line.startswith("MAPS_API_KEY="):
                     return line.split("=")[1].strip()
     except Exception:

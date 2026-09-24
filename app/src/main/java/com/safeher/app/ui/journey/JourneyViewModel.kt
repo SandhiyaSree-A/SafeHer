@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.safeher.app.data.repository.PlacesAutocompleteRepository
+import com.safeher.app.data.repository.PlaceSuggestion
 
 data class JourneyUiState(
     val searchQuery: String = "",
@@ -50,6 +52,10 @@ class JourneyViewModel(
 
     private val firestore = FirebaseFirestore.getInstance()
     private var journeyListenerRegistration: ListenerRegistration? = null
+    private val placesRepository = PlacesAutocompleteRepository()
+
+    private val _placeSuggestions = MutableStateFlow<List<PlaceSuggestion>>(emptyList())
+    val placeSuggestions: StateFlow<List<PlaceSuggestion>> = _placeSuggestions.asStateFlow()
 
     fun updateCurrentLocation(lat: Double, lng: Double) {
         if (lat != 0.0 && lng != 0.0) {
@@ -59,6 +65,83 @@ class JourneyViewModel(
 
     fun updateSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
+    }
+
+        fun onSearchTextChanged(query: String) {
+        updateSearchQuery(query)
+        if (query.length < 3) {
+            _placeSuggestions.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            placesRepository.autocomplete(
+                query = query,
+                biasLat = _uiState.value.originLat.takeIf { it != 0.0 },
+                biasLng = _uiState.value.originLng.takeIf { it != 0.0 }
+            ).onSuccess { _placeSuggestions.value = it }
+             .onFailure { _placeSuggestions.value = emptyList() }
+        }
+    }
+
+    fun onPlaceSelected(placeId: String, displayText: String) {
+        updateSearchQuery(displayText)
+        _placeSuggestions.value = emptyList()
+        viewModelScope.launch {
+            placesRepository.getPlaceDetails(placeId).onSuccess { details ->
+                searchAndScoreRoutesAtCoordinates(details.lat, details.lng, details.formattedAddress)
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(errorMessage = err.localizedMessage ?: "Failed to resolve place details")
+                }
+            }
+        }
+    }
+
+    fun searchAndScoreRoutesAtCoordinates(lat: Double, lng: Double, address: String) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                    destinationAddress = address,
+                    isJourneySaved = false
+                )
+            }
+
+            // destinationQuery left blank + fallback coords supplied
+            // => scoreDynamicRoutes skips geocoding entirely and uses this exact point.
+            val result = repository.scoreDynamicRoutes(
+                originLat = _uiState.value.originLat,
+                originLng = _uiState.value.originLng,
+                destinationQuery = "",
+                destLatFallback = lat,
+                destLngFallback = lng
+            )
+
+            result.fold(
+                onSuccess = { routes ->
+                    val firstRoute = routes.firstOrNull()
+                    val lastPoint = firstRoute?.points?.lastOrNull()
+                    _uiState.update {
+                        it.copy(
+                            routes = routes,
+                            selectedRoute = firstRoute,
+                            destLat = lastPoint?.lat ?: lat,
+                            destLng = lastPoint?.lng ?: lng,
+                            isLoading = false
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = err.localizedMessage ?: "Failed to score routes"
+                        )
+                    }
+                }
+            )
+        }
     }
 
     fun setTransportMode(mode: String) {
@@ -250,3 +333,4 @@ class JourneyViewModel(
         super.onCleared()
     }
 }
+

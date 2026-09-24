@@ -25,6 +25,7 @@ data class GeocodedLocation(
 class RouteScoringRepository {
     private val firestore = FirebaseFirestore.getInstance()
     private val offlineSync = OfflineSyncRepository.get(FirebaseApp.getInstance().applicationContext)
+    private val googleDirections = GoogleDirectionsRepository()
     private val disclaimerText = "Risk-awareness estimate for prototype/demo purposes only, not a guarantee of real-world safety or crime prediction"
 
     /**
@@ -65,7 +66,16 @@ class RouteScoringRepository {
                 Pair(originLat, originLng)
             }
 
-            // STEP 3: Try Backend Route Analysis endpoint (FastAPI + NASA + OSRM)
+                        // STEP 3: Try Google Directions first — real, road-following alternatives.
+            val googleResult = googleDirections.fetchRoutes(
+                effectiveOriginLat, effectiveOriginLng, destLat, destLng
+            ).getOrNull()
+
+            if (googleResult != null && googleResult.isNotEmpty()) {
+                return@withContext Result.success(googleResult)
+            }
+
+            // STEP 4: Backend Route Analysis endpoint (FastAPI + NASA + OSRM)
             val backendResult = try {
                 fetchBackendRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery)
             } catch (e: Exception) {
@@ -76,7 +86,7 @@ class RouteScoringRepository {
                 return@withContext Result.success(backendResult)
             }
 
-            // STEP 4: Fallback local route calculation engine (when backend is offline)
+            // STEP 5: Fallback local route calculation engine (when both above are unavailable)
             val localRoutes = generateLocalFallbackRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery)
             Result.success(localRoutes)
         } catch (e: Exception) {
