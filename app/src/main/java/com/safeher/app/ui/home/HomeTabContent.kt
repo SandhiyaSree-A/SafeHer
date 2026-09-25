@@ -29,6 +29,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.safeher.app.R
 import com.safeher.app.data.model.RoutePoint
 import com.safeher.app.data.model.User
 import com.safeher.app.ui.map.MapMarker
