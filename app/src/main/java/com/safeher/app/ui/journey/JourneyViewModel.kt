@@ -115,7 +115,8 @@ class JourneyViewModel(
                 originLng = _uiState.value.originLng,
                 destinationQuery = "",
                 destLatFallback = lat,
-                destLngFallback = lng
+                destLngFallback = lng,
+                transportMode = _uiState.value.selectedTransportMode
             )
 
             result.fold(
@@ -174,7 +175,8 @@ class JourneyViewModel(
             val result = repository.scoreDynamicRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
-                destinationQuery = targetQuery
+                destinationQuery = targetQuery,
+                transportMode = _uiState.value.selectedTransportMode
             )
 
             result.fold(

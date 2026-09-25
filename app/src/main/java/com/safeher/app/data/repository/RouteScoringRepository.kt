@@ -37,7 +37,8 @@ class RouteScoringRepository {
         originLng: Double,
         destinationQuery: String,
         destLatFallback: Double = 0.0,
-        destLngFallback: Double = 0.0
+        destLngFallback: Double = 0.0,
+        transportMode: String = "driving"
     ): Result<List<RouteOption>> = withContext(Dispatchers.IO) {
         try {
             // STEP 1: Geocode destination query or use fallback coordinates
@@ -57,7 +58,7 @@ class RouteScoringRepository {
                 }
             }
 
-            // STEP 2: Handle missing/uninitialized or far-away origin coordinates (e.g. 0,0 or default US coordinates)
+            // STEP 2: Handle missing/uninitialized or far-away origin coordinates
             val approxDistToDest = Math.hypot(destLat - originLat, destLng - originLng) * 111.0
             val (effectiveOriginLat, effectiveOriginLng) = if (originLat == 0.0 || originLng == 0.0) {
                 // Infer origin ~4 km southwest of destination in the same local city region
@@ -66,16 +67,7 @@ class RouteScoringRepository {
                 Pair(originLat, originLng)
             }
 
-                        // STEP 3: Try Google Directions first — real, road-following alternatives.
-            val googleResult = googleDirections.fetchRoutes(
-                effectiveOriginLat, effectiveOriginLng, destLat, destLng
-            ).getOrNull()
-
-            if (googleResult != null && googleResult.isNotEmpty()) {
-                return@withContext Result.success(googleResult)
-            }
-
-            // STEP 4: Backend Route Analysis endpoint (FastAPI + NASA + OSRM)
+            // STEP 3: Backend Route Analysis endpoint (FastAPI + NASA + OSRM)
             val backendResult = try {
                 fetchBackendRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery)
             } catch (e: Exception) {
@@ -84,6 +76,20 @@ class RouteScoringRepository {
 
             if (backendResult != null && backendResult.isNotEmpty()) {
                 return@withContext Result.success(backendResult)
+            }
+
+            // STEP 4: Try OSRM (GoogleDirectionsRepository) — real, road-following alternatives.
+            val googleResultRes = googleDirections.fetchRoutes(
+                effectiveOriginLat, effectiveOriginLng, destLat, destLng, transportMode
+            )
+            
+            val googleResult = googleResultRes.getOrNull()
+            if (googleResultRes.isFailure) {
+                android.util.Log.e("RouteScoringRepo", "Routing API Failed:", googleResultRes.exceptionOrNull())
+            }
+
+            if (googleResult != null && googleResult.isNotEmpty()) {
+                return@withContext Result.success(googleResult)
             }
 
             // STEP 5: Fallback local route calculation engine (when both above are unavailable)

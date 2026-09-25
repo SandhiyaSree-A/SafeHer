@@ -26,36 +26,40 @@ class GoogleDirectionsRepository {
         originLat: Double,
         originLng: Double,
         destLat: Double,
-        destLng: Double
+        destLng: Double,
+        transportMode: String = "driving"
     ): Result<List<RouteOption>> = withContext(Dispatchers.IO) {
         try {
-            val apiKey = BuildConfig.MAPS_API_KEY
-            if (apiKey.isBlank() || apiKey == "YOUR_GOOGLE_MAPS_API_KEY_HERE") {
-                return@withContext Result.failure(Exception("MAPS_API_KEY is not set in local.properties"))
+            val osrmMode = when (transportMode.toLowerCase()) {
+                "walking" -> "foot"
+                "bicycling" -> "bike"
+                else -> "driving"
             }
-
-            val endpoint = "https://maps.googleapis.com/maps/api/directions/json" +
-                    "?origin=$originLat,$originLng" +
-                    "&destination=$destLat,$destLng" +
-                    "&alternatives=true" +
-                    "&mode=driving" +
-                    "&key=${URLEncoder.encode(apiKey, "UTF-8")}"
+            // Using OSRM public API (Free, no API key required for testing)
+            // Note: OSRM expects longitude first, then latitude!
+            val endpoint = "http://router.project-osrm.org/route/v1/$osrmMode/" +
+                    "$originLng,$originLat;$destLng,$destLat" +
+                    "?alternatives=3" +
+                    "&geometries=polyline" +
+                    "&overview=full" +
+                    "&steps=true"
 
             val conn = URL(endpoint).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "SafeHer-App/1.0")
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
 
             if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-                return@withContext Result.failure(Exception("Directions API HTTP ${conn.responseCode}"))
+                return@withContext Result.failure(Exception("OSRM API HTTP ${conn.responseCode}"))
             }
 
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(responseText)
-            val status = json.optString("status")
-            if (status != "OK") {
+            val status = json.optString("code")
+            if (status != "Ok") {
                 return@withContext Result.failure(
-                    Exception("Directions API status: $status (${json.optString("error_message")})")
+                    Exception("OSRM API status: $status (${json.optString("message")})")
                 )
             }
 
@@ -64,9 +68,6 @@ class GoogleDirectionsRepository {
                 return@withContext Result.failure(Exception("No routes returned"))
             }
 
-            // Deterministic risk styling per alternative slot (fastest = safest-styled,
-            // matching the app's existing low/medium/high convention). These are display
-            // labels, not a real safety model — Directions API has no safety signal.
             val riskProfiles = listOf(
                 Triple("low", "Low Risk (Safest)", 0.85),
                 Triple("medium", "Medium Risk", 0.62),
@@ -80,33 +81,47 @@ class GoogleDirectionsRepository {
                 if (legs.length() == 0) continue
                 val leg = legs.getJSONObject(0)
 
-                val distanceText = leg.getJSONObject("distance").getString("text")
-                val durationText = leg.getJSONObject("duration").getString("text")
+                val distMeters = route.optDouble("distance", 0.0)
+                val durSeconds = route.optDouble("duration", 0.0)
+                
+                val distanceText = String.format("%.1f km", distMeters / 1000.0)
+                val totalMins = (durSeconds / 60.0).toInt()
+                val durationText = if (totalMins >= 60) {
+                    val hrs = totalMins / 60
+                    val mins = totalMins % 60
+                    "$hrs hr $mins mins"
+                } else {
+                    "$totalMins mins"
+                }
 
-                val overviewPolyline = route.getJSONObject("overview_polyline").getString("points")
+                val overviewPolyline = route.getString("geometry")
                 val decodedLatLngs = PolyUtil.decode(overviewPolyline)
                 val points = decodedLatLngs.map { RoutePoint(it.latitude, it.longitude) }
                 if (points.size < 2) continue
 
-                val summary = route.optString("summary").takeIf { it.isNotBlank() }
-                    ?: "Route ${i + 1}"
+                val summary = leg.optString("summary").takeIf { it.isNotBlank() }
+                    ?: "Alternative Route ${i + 1}"
 
                 val stepsJson = leg.optJSONArray("steps")
                 val turnSteps = mutableListOf<RouteTurnStep>()
                 if (stepsJson != null) {
                     for (s in 0 until stepsJson.length()) {
                         val step = stepsJson.getJSONObject(s)
-                        val instruction = step.optString("html_instructions")
-                            .replace(Regex("<[^>]*>"), "") // strip Google's inline HTML tags
-                        val startLoc = step.optJSONObject("start_location")
+                        val maneuver = step.optJSONObject("maneuver")
+                        val instruction = maneuver?.optString("type") + " " + maneuver?.optString("modifier")
+                        
+                        val location = maneuver?.optJSONArray("location")
+                        val startLng = location?.optDouble(0) ?: 0.0
+                        val startLat = location?.optDouble(1) ?: 0.0
+
                         turnSteps.add(
                             RouteTurnStep(
-                                instruction = instruction,
-                                roadName = summary,
-                                distanceMeters = step.optJSONObject("distance")?.optDouble("value") ?: 0.0,
-                                durationSeconds = step.optJSONObject("duration")?.optDouble("value") ?: 0.0,
-                                startLat = startLoc?.optDouble("lat") ?: 0.0,
-                                startLng = startLoc?.optDouble("lng") ?: 0.0
+                                instruction = instruction.trim(),
+                                roadName = step.optString("name", summary),
+                                distanceMeters = step.optDouble("distance", 0.0),
+                                durationSeconds = step.optDouble("duration", 0.0),
+                                startLat = startLat,
+                                startLng = startLng
                             )
                         )
                     }
@@ -118,7 +133,7 @@ class GoogleDirectionsRepository {
 
                 options.add(
                     RouteOption(
-                        routeId = "google_route_$i",
+                        routeId = "osrm_route_$i",
                         name = "Via $summary",
                         viaRoute = summary,
                         distance = distanceText,
@@ -126,7 +141,7 @@ class GoogleDirectionsRepository {
                         compositeScore = compositeScore,
                         modelRiskLabel = riskLabel,
                         displayRisk = displayRisk,
-                        lightingScore = compositeScore, // no real lighting signal from Directions; mirrors compositeScore
+                        lightingScore = compositeScore,
                         crowdDensity = "unknown",
                         turnSteps = turnSteps,
                         disclaimer = disclaimerText,
