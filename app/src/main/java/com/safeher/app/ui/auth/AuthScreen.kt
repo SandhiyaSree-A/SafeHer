@@ -45,6 +45,13 @@ fun AuthScreen(
         }
     }
 
+    if (uiState is AuthUiState.Loading) {
+        ScootyLoadingScreen(
+            message = if (isSignUpMode) "Creating account & signing in..." else "Loading SafeHer..."
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -215,14 +222,7 @@ fun AuthScreen(
                             .fillMaxWidth()
                             .height(50.dp)
                     ) {
-                        if (uiState is AuthUiState.Loading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        } else {
-                            Text("Sign In", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        }
+                        Text("Sign In", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     TextButton(
@@ -302,14 +302,7 @@ fun AuthScreen(
                                     .fillMaxWidth()
                                     .height(50.dp)
                             ) {
-                                if (uiState is AuthUiState.Loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
-                                } else {
-                                    Text("Create Account & Sign In", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                }
+                                Text("Create Account & Sign In", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
 
@@ -351,14 +344,7 @@ otpError?.let {
                                     .fillMaxWidth()
                                     .height(50.dp)
                             ) {
-                                if (uiState is AuthUiState.Loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
-                                } else {
-                                    Text("Verify OTP & Continue", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                }
+                                Text("Verify OTP & Continue", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                             }
 
                             TextButton(
@@ -406,14 +392,7 @@ otpError?.let {
                                     .fillMaxWidth()
                                     .height(50.dp)
                             ) {
-                                if (uiState is AuthUiState.Loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
-                                } else {
-                                    Text("Send Verification OTP", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                                }
+                                Text("Send Verification OTP", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                             }
 
                             TextButton(

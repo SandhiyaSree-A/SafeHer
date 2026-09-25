@@ -17,6 +17,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.safeher.app.R
 import com.safeher.app.data.model.User
 import com.safeher.app.ui.home.HomeTabContent
 import com.safeher.app.ui.home.HomeViewModel
@@ -97,6 +103,22 @@ fun UserHomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // Root Screen Level Watermark: Rendered as the first/background layer
+            // Positioned behind all screen content, cards, and scrollables
+            // Applied strictly ONLY to Home screen and Profile screen
+            if (selectedTab == UserHomeTab.HOME || selectedTab == UserHomeTab.PROFILE) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_safeher_watermark),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth(0.70f)
+                        .aspectRatio(1f)
+                        .align(Alignment.Center),
+                    contentScale = ContentScale.Fit,
+                    alpha = 0.55f
+                )
+            }
+
             Column(modifier = Modifier.fillMaxSize()) {
                 // Persistent Active Alert Banner (shown across all tabs when SOS is active)
                 ActiveAlertBanner(

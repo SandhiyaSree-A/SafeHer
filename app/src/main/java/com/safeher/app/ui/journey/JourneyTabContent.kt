@@ -196,7 +196,8 @@ fun JourneyTabContent(
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -209,7 +210,8 @@ fun JourneyTabContent(
                             },
                             placeholder = { Text("Enter exact address or place...") },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            modifier = Modifier.weight(1f),
+
                             singleLine = true
                         )
                         

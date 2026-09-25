@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pale_pink_background">#FFF2F5</color>
+    <color name="pale_pink_surface">#FFFFFF</color>
+    <color name="pale_pink_surface_variant">#FDE8ED</color>
+    <color name="pale_pink_primary_container">#FFDDE4</color>
+    <color name="dusky_pink_primary">#FF4B6E</color>
+    <color name="dusky_pink_secondary">#4A152B</color>
+    <color name="dark_pink_brown_text">#2D151E</color>
+</resources>
