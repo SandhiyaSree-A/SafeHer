@@ -69,7 +69,7 @@ class RouteScoringRepository {
 
             // STEP 3: Backend Route Analysis endpoint (FastAPI + NASA + OSRM)
             val backendResult = try {
-                fetchBackendRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery)
+                fetchBackendRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery, transportMode)
             } catch (e: Exception) {
                 null
             }
@@ -105,7 +105,8 @@ class RouteScoringRepository {
         originLng: Double,
         destLat: Double,
         destLng: Double,
-        destinationQuery: String
+        destinationQuery: String,
+        transportMode: String = "driving"
     ): List<RouteOption> {
         val endpointUrl = "http://10.0.2.2:8000/analyze-route"
         val url = URL(endpointUrl)
@@ -121,6 +122,7 @@ class RouteScoringRepository {
             put("source_lon", originLng)
             put("destination_lat", destLat)
             put("destination_lon", destLng)
+            put("mode", transportMode)
         }
 
         conn.outputStream.use { output ->

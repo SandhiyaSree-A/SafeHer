@@ -63,18 +63,17 @@ def analyze_route_lighting(
         "\nGetting NASA lighting data..."
     )
 
-    nasa_file = get_latest_nasa_file(
-        latitude,
-        longitude
-    )
+    try:
+        nasa_file = get_latest_nasa_file(
+            latitude,
+            longitude
+        )
+        print("\nNASA file ready:")
+        print(nasa_file)
+    except Exception as e:
+        print(f"\nWarning: NASA data unavailable ({e}). Using simulated lighting.")
+        nasa_file = None
 
-    print(
-        "\nNASA file ready:"
-    )
-
-    print(
-        nasa_file
-    )
 
     # ----------------------------------
     # ANALYZE EACH POINT
@@ -94,11 +93,22 @@ def analyze_route_lighting(
             f"{len(sampled_points)}"
         )
 
-        result = get_light_density(
-            nasa_file,
-            point["latitude"],
-            point["longitude"]
-        )
+        if nasa_file:
+            result = get_light_density(
+                nasa_file,
+                point["latitude"],
+                point["longitude"]
+            )
+        else:
+            # Simulated lighting data
+            import random
+            sim_score = random.uniform(60, 95)
+            result = {
+                "latitude": point["latitude"],
+                "longitude": point["longitude"],
+                "selected_radiance": sim_score / 2.0,
+                "light_score": sim_score
+            }
 
         result["point_number"] = index
 

@@ -34,55 +34,48 @@ def get_routes(
     Get alternative routes (driving, walking, bike) from Google Maps Directions API
     with traffic duration and polyline.
     """
-    api_key = get_maps_api_key()
-    if not api_key:
-        raise RuntimeError("MAPS_API_KEY is not set or found in local.properties")
-        
-    gmaps_mode = "driving"
+    osrm_mode = "driving"
     if mode in ["walking", "walk"]:
-        gmaps_mode = "walking"
+        osrm_mode = "foot"
     elif mode in ["bicycling", "bike"]:
-        gmaps_mode = "bicycling"
+        osrm_mode = "bike"
 
-    url = "https://maps.googleapis.com/maps/api/directions/json"
+    url = f"http://router.project-osrm.org/route/v1/{osrm_mode}/{source_lon},{source_lat};{destination_lon},{destination_lat}"
     params = {
-        "origin": f"{source_lat},{source_lon}",
-        "destination": f"{destination_lat},{destination_lon}",
-        "mode": gmaps_mode,
-        "alternatives": "true",
-        "departure_time": "now",
-        "key": api_key
+        "alternatives": "3",
+        "geometries": "polyline",
+        "overview": "full"
     }
 
-    print(f"\nRequesting real-time {mode} routes from Google Maps API...")
+    print(f"\nRequesting real-time {mode} routes from OSRM API...")
 
     response = requests.get(url, params=params, timeout=30)
     if response.status_code != 200:
-        raise RuntimeError(f"Google Maps API failed with status {response.status_code}")
+        raise RuntimeError(f"OSRM API failed with status {response.status_code}")
 
     data = response.json()
-    if data.get("status") != "OK":
-        if data.get("status") == "ZERO_RESULTS":
+    if data.get("code") != "Ok":
+        if data.get("code") == "NoRoute":
             return []
-        raise RuntimeError(f"Google Maps API returned error: {data.get('status')}")
+        raise RuntimeError(f"OSRM API returned error: {data.get('code')} - {data.get('message', '')}")
 
     routes = []
     for index, route in enumerate(data.get("routes", [])):
         # Decode overview_polyline
         import polyline
-        encoded_polyline = route["overview_polyline"]["points"]
+        encoded_polyline = route["geometry"]
         coordinates = polyline.decode(encoded_polyline)
         route_points = [
             {"latitude": coord[0], "longitude": coord[1]}
             for coord in coordinates
         ]
 
-        leg = route["legs"][0]
-        distance_meters = leg["distance"]["value"]
-        duration_seconds = leg["duration"]["value"]
-        duration_in_traffic_seconds = leg.get("duration_in_traffic", {}).get("value", duration_seconds)
+        distance_meters = route.get("distance", 0.0)
+        duration_seconds = route.get("duration", 0.0)
+        duration_in_traffic_seconds = duration_seconds # OSRM doesn't have traffic
 
-        summary_name = route.get("summary", "")
+        leg = route.get("legs", [{}])[0]
+        summary_name = leg.get("summary", "")
         via_route_str = f"via {summary_name}" if summary_name else f"via Alternative Route {index + 1}"
 
         routes.append({

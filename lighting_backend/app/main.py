@@ -47,6 +47,7 @@ class RouteRequest(BaseModel):
     destination_lat: float
     destination_lon: float
 
+    mode: str = "driving"  # driving | walking | bicycling
 
 # ----------------------------------
 # HOME ENDPOINT
@@ -154,7 +155,8 @@ def analyze_route(request: RouteRequest):
             request.source_lat,
             request.source_lon,
             request.destination_lat,
-            request.destination_lon
+            request.destination_lon,
+            mode=request.mode
         )
 
         if not routes:
@@ -167,7 +169,7 @@ def analyze_route(request: RouteRequest):
         # ANALYZE ALL ROUTES
         # ----------------------------------
 
-        result = analyze_routes(
+        result = analyze_multi_factor_routes(
             routes,
             interval_meters=300
         )
