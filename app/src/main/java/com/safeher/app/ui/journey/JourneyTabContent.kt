@@ -27,6 +27,7 @@ import com.safeher.app.data.model.RouteOption
 import com.safeher.app.data.model.RoutePoint
 import com.safeher.app.data.model.SafetiPinMetrics
 import com.safeher.app.data.model.User
+import com.safeher.app.ui.auth.ScootyLoadingScreen
 import com.safeher.app.ui.map.MapMarker
 import com.safeher.app.ui.map.MarkerKind
 import com.safeher.app.ui.map.SafeHerMap
@@ -50,6 +51,7 @@ fun JourneyTabContent(
     }
 
     var searchInput by remember { mutableStateOf(uiState.searchQuery) }
+    val placeSuggestions by viewModel.placeSuggestions.collectAsState()
 
     val trail = remember { mutableStateListOf<RoutePoint>() }
     LaunchedEffect(uiState.currentPingLat, uiState.currentPingLng, uiState.isJourneyActive) {
@@ -198,31 +200,95 @@ fun JourneyTabContent(
                     Spacer(modifier = Modifier.height(8.dp))
 
 
+                    // Place Autocomplete Search Field
+                    val suggestionsExpanded = placeSuggestions.isNotEmpty()
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.Top
                     ) {
-                        OutlinedTextField(
-                            value = searchInput,
-                            onValueChange = {
-                                searchInput = it
-                                viewModel.updateSearchQuery(it)
-                            },
-                            placeholder = { Text("Enter exact address or place...") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                            modifier = Modifier.weight(1f),
+                        ExposedDropdownMenuBox(
+                            expanded = suggestionsExpanded,
+                            onExpandedChange = { /* controlled by suggestions list */ },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = searchInput,
+                                onValueChange = {
+                                    searchInput = it
+                                    viewModel.onSearchTextChanged(it)
+                                },
+                                placeholder = { Text("School, address, place name...") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                                trailingIcon = {
+                                    if (searchInput.isNotEmpty()) {
+                                        IconButton(onClick = {
+                                            searchInput = ""
+                                            viewModel.onSearchTextChanged("")
+                                        }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                singleLine = true
+                            )
 
-                            singleLine = true
-                        )
-                        
+                            if (suggestionsExpanded) {
+                                ExposedDropdownMenu(
+                                    expanded = true,
+                                    onDismissRequest = { /* keep open while typing */ }
+                                ) {
+                                    placeSuggestions.forEach { suggestion ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(
+                                                        text = suggestion.primaryText,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 13.sp
+                                                    )
+                                                    if (suggestion.secondaryText.isNotBlank()) {
+                                                        Text(
+                                                            text = suggestion.secondaryText,
+                                                            fontSize = 11.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.Place,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            },
+                                            onClick = {
+                                                searchInput = suggestion.primaryText
+                                                viewModel.onPlaceSelected(
+                                                    placeId = suggestion.placeId,
+                                                    displayText = suggestion.primaryText
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
-                            onClick = { 
-                                viewModel.searchAndScoreRoutes(searchInput) 
+                            onClick = {
+                                viewModel.searchAndScoreRoutes(searchInput)
                             },
-                            modifier = Modifier.height(56.dp)
+                            modifier = Modifier
+                                .height(56.dp)
+                                .align(Alignment.CenterVertically)
                         ) {
-                            Text("Search")
+                            Text("Go")
                         }
                     }
 
@@ -288,9 +354,15 @@ fun JourneyTabContent(
             )
 
             if (uiState.isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center)
-                )
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ScootyLoadingScreen(
+                        message = "Finding safe routes...",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
 
@@ -462,7 +534,7 @@ fun RouteCardItem(
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Text(
-                        text = "Score: ${route.compositeScore}",
+                        text = "Score: ${ "%.1f".format(route.compositeScore) }%",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
@@ -493,7 +565,7 @@ fun RouteCardItem(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Light: ${(route.lightingScore).toInt()}",
+                    text = "💡 Light: ${ "%.1f".format(route.lightingScore * 100) }%",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.outline
@@ -513,18 +585,18 @@ fun RouteCardItem(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("💡 Light: ${(route.lightingScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("👥 Human: ${(route.humanPresenceScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("🏪 Activity: ${(route.activityDensityScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("💡 Light: ${ "%.1f".format(route.lightingScore * 100) }%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("👥 Human: ${ "%.1f".format(route.humanPresenceScore * 100) }%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("🏪 Activity: ${ "%.1f".format(route.activityDensityScore * 100) }%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("🚗 Traffic: ${(route.trafficScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("🚶 Pedestrian: ${(route.pedestrianScore).toInt()}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("🔍 Confidence: ${(route.confidenceScore * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        Text("🚗 Traffic: ${ "%.1f".format(route.trafficScore * 100) }%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("🚶 Pedestrian: ${ "%.1f".format(route.pedestrianScore * 100) }%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("🔍 Confidence: ${ "%.1f".format(route.confidenceScore * 100) }%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
