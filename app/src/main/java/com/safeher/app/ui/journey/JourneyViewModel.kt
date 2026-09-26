@@ -148,8 +148,9 @@ class JourneyViewModel(
     fun setTransportMode(mode: String) {
         if (_uiState.value.selectedTransportMode == mode) return
         _uiState.update { it.copy(selectedTransportMode = mode) }
-        if (_uiState.value.searchQuery.isNotBlank()) {
-            searchAndScoreRoutes()
+        val target = _uiState.value.destinationAddress.ifBlank { _uiState.value.searchQuery }.trim()
+        if (target.isNotBlank()) {
+            searchAndScoreRoutes(target)
         }
     }
 

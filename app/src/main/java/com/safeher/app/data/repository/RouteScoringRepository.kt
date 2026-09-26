@@ -93,7 +93,7 @@ class RouteScoringRepository {
             }
 
             // STEP 5: Fallback local route calculation engine (when both above are unavailable)
-            val localRoutes = generateLocalFallbackRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery)
+            val localRoutes = generateLocalFallbackRoutes(effectiveOriginLat, effectiveOriginLng, destLat, destLng, destinationQuery, transportMode)
             Result.success(localRoutes)
         } catch (e: Exception) {
             Result.failure(e)
@@ -218,22 +218,51 @@ class RouteScoringRepository {
         originLng: Double,
         destLat: Double,
         destLng: Double,
-        query: String
+        query: String,
+        transportMode: String = "driving"
     ): List<RouteOption> {
         val dLat = destLat - originLat
         val dLng = destLng - originLng
+
+        val locSeed = (((destLat * 1000).toInt() * 73856093) xor ((destLng * 1000).toInt() * 19349663) xor (query.hashCode()))
+        val locVariance = (Math.abs(locSeed) % 1400) / 100.0 - 7.0
+
+        val r1Score = (85.0 + locVariance).coerceIn(40.0, 95.0)
+        val r2Score = (68.0 + locVariance * 0.8).coerceIn(35.0, 85.0)
+        val r3Score = (48.0 + locVariance * 0.6).coerceIn(25.0, 70.0)
+
+        fun formatModeDuration(distKm: Double, extraMins: Int = 0): String {
+            val mins = when (transportMode.toLowerCase()) {
+                "walking", "foot" -> (distKm * 12.5).toInt().coerceAtLeast(1) + extraMins
+                "bicycling", "bike" -> (distKm * 3.75).toInt().coerceAtLeast(1) + extraMins
+                else -> (distKm * 1.6).toInt().coerceAtLeast(1) + extraMins
+            }
+            return if (mins >= 60) {
+                val h = mins / 60
+                val m = mins % 60
+                if (m == 0) "$h hr" else "$h hr $m mins"
+            } else {
+                "$mins mins"
+            }
+        }
 
         // 3 alternate route polylines
         val r1 = RouteOption(
             routeId = "route_1",
             name = "Via Main Arterial Road (High Lighting)",
+            transportMode = transportMode,
             distance = "4.8 km",
-            duration = "12 mins",
-            compositeScore = 0.85,
+            duration = formatModeDuration(4.8),
+            compositeScore = r1Score,
             modelRiskLabel = "low",
             displayRisk = "Low Risk (Safest)",
-            lightingScore = 0.90,
-            crowdDensity = "high",
+            lightingScore = (r1Score * 0.88).coerceIn(20.0, 95.0),
+            humanPresenceScore = (r1Score * 0.82).coerceIn(20.0, 92.0),
+            activityDensityScore = (r1Score * 0.78).coerceIn(15.0, 88.0),
+            trafficScore = (r1Score * 0.72).coerceIn(10.0, 85.0),
+            pedestrianScore = (r1Score * 0.75).coerceIn(10.0, 88.0),
+            confidenceScore = 0.91,
+            crowdDensity = "HIGH",
             disclaimer = disclaimerText,
             points = listOf(
                 RoutePoint(originLat, originLng),
@@ -246,13 +275,19 @@ class RouteScoringRepository {
         val r2 = RouteOption(
             routeId = "route_2",
             name = "Via Central Park Avenue",
+            transportMode = transportMode,
             distance = "5.5 km",
-            duration = "15 mins",
-            compositeScore = 0.62,
+            duration = formatModeDuration(5.5, 2),
+            compositeScore = r2Score,
             modelRiskLabel = "medium",
             displayRisk = "Medium Risk",
-            lightingScore = 0.65,
-            crowdDensity = "medium",
+            lightingScore = (r2Score * 0.80).coerceIn(20.0, 85.0),
+            humanPresenceScore = (r2Score * 0.75).coerceIn(15.0, 80.0),
+            activityDensityScore = (r2Score * 0.70).coerceIn(15.0, 78.0),
+            trafficScore = (r2Score * 0.65).coerceIn(10.0, 75.0),
+            pedestrianScore = (r2Score * 0.70).coerceIn(10.0, 78.0),
+            confidenceScore = 0.87,
+            crowdDensity = "MEDIUM",
             disclaimer = disclaimerText,
             points = listOf(
                 RoutePoint(originLat, originLng),
@@ -272,15 +307,20 @@ class RouteScoringRepository {
         val r3 = RouteOption(
             routeId = "route_3",
             name = "Via Service Bypass (Secondary Alley)",
+            transportMode = transportMode,
             distance = "6.2 km",
-            duration = "19 mins",
-            compositeScore = 0.38,
+            duration = formatModeDuration(6.2, 4),
+            compositeScore = r3Score,
             modelRiskLabel = "high",
             displayRisk = "High Risk",
-            lightingScore = 0.40,
+            lightingScore = (r3Score * 0.70).coerceIn(15.0, 70.0),
+            humanPresenceScore = (r3Score * 0.60).coerceIn(10.0, 65.0),
+            activityDensityScore = (r3Score * 0.55).coerceIn(10.0, 60.0),
+            trafficScore = (r3Score * 0.60).coerceIn(10.0, 65.0),
+            pedestrianScore = (r3Score * 0.55).coerceIn(10.0, 60.0),
+            confidenceScore = 0.82,
             crowdDensity = "LOW (Isolated / Low Crowd)",
             trafficCondition = "Congested Traffic (Avg 9 km/h)",
-            trafficScore = 0.45,
             disclaimer = disclaimerText,
             darkSpots = listOf(route3Points[1], route3Points[2]),
             points = route3Points

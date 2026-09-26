@@ -127,7 +127,16 @@ fun SafeHerMap(
     GoogleMap(
         modifier = modifier,
         cameraPositionState = cameraPositionState,
-        uiSettings = MapUiSettings(zoomControlsEnabled = true, myLocationButtonEnabled = false)
+        uiSettings = MapUiSettings(
+            zoomControlsEnabled = false,
+            myLocationButtonEnabled = false,
+            mapToolbarEnabled = false,
+            compassEnabled = false,
+            rotationGesturesEnabled = true,
+            scrollGesturesEnabled = true,
+            tiltGesturesEnabled = true,
+            zoomGesturesEnabled = true
+        )
     ) {
         // Route polylines
         routes.forEachIndexed { index, route ->
@@ -156,7 +165,10 @@ fun SafeHerMap(
             Marker(
                 state = MarkerState(position = LatLng(m.lat, m.lng)),
                 title = markerTitle(m.kind),
-                icon = BitmapDescriptorFactory.defaultMarker(markerHue(m.kind))
+                icon = BitmapDescriptorFactory.defaultMarker(markerHue(m.kind)),
+                onClick = {
+                    true
+                }
             )
         }
     }
