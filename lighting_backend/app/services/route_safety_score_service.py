@@ -63,10 +63,26 @@ def analyze_multi_factor_routes(routes, interval_meters=300):
             elif pr: reasons['pedestrian'] = pr
             
         import random
+        from datetime import datetime
+        
+        current_hour = datetime.now().hour
+        is_late_night = current_hour >= 22 or current_hour <= 5
+
+        if is_late_night:
+            # At midnight/late night, human presence, activity and traffic are much lower
+            sim_human_min, sim_human_max = 10.0, 40.0
+            sim_activity_min, sim_activity_max = 5.0, 25.0
+            sim_traffic_min, sim_traffic_max = 5.0, 30.0
+            # Lighting might also be a bit lower or same, but overall score should drop
+        else:
+            sim_human_min, sim_human_max = 60.0, 95.0
+            sim_activity_min, sim_activity_max = 50.0, 90.0
+            sim_traffic_min, sim_traffic_max = 40.0, 85.0
+
         # Fallback to simulated scores if the external APIs fail or are missing keys
-        avg_human = sum(human_scores)/len(human_scores) if human_scores else random.uniform(60.0, 95.0)
-        avg_activity = sum(activity_scores)/len(activity_scores) if activity_scores else random.uniform(50.0, 90.0)
-        avg_traffic = sum(traffic_scores)/len(traffic_scores) if traffic_scores else random.uniform(40.0, 85.0)
+        avg_human = sum(human_scores)/len(human_scores) if human_scores else random.uniform(sim_human_min, sim_human_max)
+        avg_activity = sum(activity_scores)/len(activity_scores) if activity_scores else random.uniform(sim_activity_min, sim_activity_max)
+        avg_traffic = sum(traffic_scores)/len(traffic_scores) if traffic_scores else random.uniform(sim_traffic_min, sim_traffic_max)
         avg_pedestrian = sum(pedestrian_scores)/len(pedestrian_scores) if pedestrian_scores else random.uniform(30.0, 80.0)
         
         # Normalize and calculate final score
