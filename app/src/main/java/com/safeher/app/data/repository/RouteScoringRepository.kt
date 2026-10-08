@@ -168,6 +168,19 @@ class RouteScoringRepository {
             val confidenceScore = route.optDouble("confidence_score", 1.0)
             val compositeScore = route.optDouble("composite_score", 0.0)
 
+            // SOS Hotspot — null when backend did not include the field (Firestore unavailable)
+            val sosHotspotScore: Double? = if (route.has("sos_hotspot_score") && !route.isNull("sos_hotspot_score"))
+                route.getDouble("sos_hotspot_score") else null
+            val sosHotspotCount = route.optInt("sos_hotspot_count", 0)
+            val sosHotspotsArray = route.optJSONArray("sos_hotspot_points")
+            val sosHotspots = mutableListOf<RoutePoint>()
+            if (sosHotspotsArray != null) {
+                for (j in 0 until sosHotspotsArray.length()) {
+                    val hp = sosHotspotsArray.getJSONObject(j)
+                    sosHotspots.add(RoutePoint(lat = hp.getDouble("lat"), lng = hp.getDouble("lng")))
+                }
+            }
+
             val roundedScore = (Math.round(compositeScore * 100.0) / 100.0)
 
             val displayRisk = when {
@@ -204,6 +217,9 @@ class RouteScoringRepository {
                     activityDensityScore = activityDensityScore,
                     pedestrianScore = pedestrianScore,
                     confidenceScore = confidenceScore,
+                    sosHotspotScore = sosHotspotScore,
+                    sosHotspotCount = sosHotspotCount,
+                    sosHotspots = sosHotspots,
                     darkSpots = darkSpots,
                     points = points
                 )

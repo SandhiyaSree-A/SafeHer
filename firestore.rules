@@ -36,5 +36,16 @@ service cloud.firestore {
         isAdmin()
       );
     }
+
+    // sos_hotspots: privacy-safe aggregates written only by Admin SDK / Cloud Function.
+    // Any signed-in user may read (needed by the backend scoring service).
+    // Clients may NOT write – the Cloud Function trigger handles all writes.
+    match /sos_hotspots/{cellId} {
+      allow read:  if request.auth != null;
+      allow write: if false;  // server-only via Admin SDK
+
+      // Admin can flag a cell as isFalseAlarm
+      allow update: if isAdmin();
+    }
   }
 }

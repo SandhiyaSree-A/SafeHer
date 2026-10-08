@@ -1,6 +1,26 @@
+import os
+import hashlib
+import hmac
+import logging
 import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+SOS_HASH_SALT = os.environ.get("SOS_HASH_SALT", "default_secret_salt").encode('utf-8')
+DATABASE_URL = os.environ.get("DATABASE_URL")
+_pg_pool = None
+
+def get_pg_pool():
+    global _pg_pool
+    if _pg_pool is None and DATABASE_URL:
+        try:
+            from psycopg_pool import ConnectionPool
+            _pg_pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=5)
+        except Exception as e:
+            logger.warning("Failed to init psycopg pool in main.py: %s", e)
+    return _pg_pool
 
 from app.services.routing_service import get_routes
 from app.services.route_safety_score_service import analyze_multi_factor_routes
@@ -48,6 +68,13 @@ class RouteRequest(BaseModel):
     destination_lon: float
 
     mode: str = "driving"  # driving | walking | bicycling
+
+class SosEventRequest(BaseModel):
+    alertId: str
+    userId: str
+    lat: float
+    lng: float
+    timestamp: int  # milliseconds epoch
 
 # ----------------------------------
 # HOME ENDPOINT
@@ -298,13 +325,14 @@ def analyze_route(request: RouteRequest):
             route_id = route["route_id"]
             
             factors = route.get("factors", {})
-            
-            traffic_score = factors.get("traffic_score") or 0
-            human_score = factors.get("human_presence_score") or 0
-            activity_score = factors.get("activity_density_score") or 0
-            pedestrian_score = factors.get("pedestrian_score") or 0
-            confidence = factors.get("confidence") or 1.0
-            composite = factors.get("final_safety_score") or 0
+
+            traffic_score        = factors.get("traffic_score") or 0
+            human_score          = factors.get("human_presence_score") or 0
+            activity_score       = factors.get("activity_density_score") or 0
+            pedestrian_score     = factors.get("pedestrian_score") or 0
+            confidence           = factors.get("confidence") or 1.0
+            composite            = factors.get("final_safety_score") or 0
+            sos_hotspot_score_val = factors.get("sos_hotspot_score")   # None when unavailable
 
             # Proxied textual condition
             traffic_condition = "Smooth Traffic" if traffic_score > 60 else ("Moderate Traffic" if traffic_score > 30 else "Congested Traffic")
@@ -318,18 +346,29 @@ def analyze_route(request: RouteRequest):
                 "average_light_score": route_lighting.get("average_light_score", 0),
                 "crowd_density": crowd_density,
                 "traffic_condition": traffic_condition,
-                
-                # New factors
-                "traffic_score": traffic_score,
-                "human_presence_score": human_score,
+
+                # Factor scores
+                "traffic_score":          traffic_score,
+                "human_presence_score":   human_score,
                 "activity_density_score": activity_score,
-                "pedestrian_score": pedestrian_score,
-                "confidence_score": confidence,
-                "composite_score": composite,
+                "pedestrian_score":       pedestrian_score,
+                "confidence_score":       confidence,
+                "composite_score":        composite,
+
+                # SOS Hotspot factor (None when Firestore unavailable)
+                "sos_hotspot_score":  sos_hotspot_score_val,
+                "sos_hotspot_count":  route.get("sos_hotspot_count", 0),
+                "sos_hotspot_points": route.get("sos_hotspot_points", []),
 
                 "via_route": route.get("via_route", ""),
                 "darkest_point_score": route_darkest.get("light_score") if route_darkest else None,
-                "coordinates": route.get("coordinates", [])
+                "coordinates": route.get("coordinates", []),
+
+                # Ethical disclaimer
+                "disclaimer": (
+                    "Risk-awareness estimate for prototype/demo purposes only, "
+                    "not a guarantee of real-world safety or crime prediction"
+                ),
             })
 
         # ----------------------------------
@@ -368,3 +407,46 @@ def analyze_route(request: RouteRequest):
             status_code=500,
             detail=str(error)
         )
+
+# ----------------------------------
+# SOS EVENTS ENDPOINT
+# ----------------------------------
+@app.post("/sos-events")
+def create_sos_event(event: SosEventRequest):
+    pool = get_pg_pool()
+    if not pool:
+        # DB empty or unreachable = fallback logic / do not crash
+        logger.warning("Database not configured or unreachable for /sos-events")
+        return {"status": "ignored", "reason": "database_unavailable"}
+
+    user_hash = hmac.new(SOS_HASH_SALT, event.userId.encode('utf-8'), hashlib.sha256).hexdigest()
+
+    try:
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                from datetime import datetime, timezone
+                dt = datetime.fromtimestamp(event.timestamp / 1000.0, tz=timezone.utc)
+                
+                cur.execute("""
+                    SELECT id FROM sos_events 
+                    WHERE user_hash = %s 
+                      AND ST_DWithin(geom, ST_SetSRID(ST_MakePoint(%s, %s), 4326), 150)
+                      AND triggered_at >= %s - INTERVAL '24 hours'
+                    LIMIT 1
+                """, (user_hash, event.lng, event.lat, dt))
+                
+                if cur.fetchone():
+                    return {"status": "ignored", "reason": "duplicate_within_24h_150m"}
+
+                cur.execute("""
+                    INSERT INTO sos_events (id, user_hash, geom, triggered_at)
+                    VALUES (%s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s)
+                    ON CONFLICT (id) DO NOTHING
+                """, (event.alertId, user_hash, event.lng, event.lat, dt))
+                
+            conn.commit()
+        return {"status": "success", "alertId": event.alertId}
+    except Exception as e:
+        logger.error(f"Error inserting SOS event: {e}", exc_info=True)
+        # We don't want to crash the caller for background SOS tracking
+        return {"status": "error", "reason": str(e)}

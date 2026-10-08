@@ -46,6 +46,10 @@ data class RouteOption(
     val activityDensityScore: Double = 0.0,
     val pedestrianScore: Double = 0.0,
     val confidenceScore: Double = 1.0,
+    // SOS Hotspot factor — null means "not available" (OSRM / local fallback paths)
+    val sosHotspotScore: Double? = null,
+    val sosHotspotCount: Int = 0,
+    val sosHotspots: List<RoutePoint> = emptyList(),
     val darkSpots: List<RoutePoint> = emptyList(),
     val turnSteps: List<RouteTurnStep> = emptyList(),
     val safetiPinMetrics: SafetiPinMetrics = SafetiPinMetrics(),

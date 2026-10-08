@@ -27,6 +27,15 @@ data class PlaceDetails(
  */
 class PlacesAutocompleteRepository {
 
+    // >>> PASTE YOUR SHA-1 HERE: 40 characters, UPPERCASE, NO colons <<<
+    private val androidCert = "C5BD3DF9CCDE8B4D1112E39D6B374CA3EB8BDD2F"
+
+    // Tells Google "this request comes from the SafeHer Android app"
+    private fun HttpURLConnection.addAndroidKeyHeaders() {
+        setRequestProperty("X-Android-Package", "com.safeher.app")
+        setRequestProperty("X-Android-Cert", androidCert)
+    }
+
     // Groups requests from one typing session together for accurate Places billing.
     private var sessionToken: String = UUID.randomUUID().toString()
 
@@ -40,6 +49,7 @@ class PlacesAutocompleteRepository {
         biasLng: Double? = null
     ): Result<List<PlaceSuggestion>> = withContext(Dispatchers.IO) {
         try {
+            android.util.Log.d("PlacesAuto", "autocomplete called: $query")
             val apiKey = BuildConfig.MAPS_API_KEY
             if (query.isBlank()) return@withContext Result.success(emptyList())
 
@@ -55,6 +65,7 @@ class PlacesAutocompleteRepository {
 
             val conn = URL(endpoint).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
+            conn.addAndroidKeyHeaders()
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
 
@@ -64,6 +75,7 @@ class PlacesAutocompleteRepository {
 
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(responseText)
+            android.util.Log.d("PlacesAuto", responseText)
             val status = json.optString("status")
             if (status != "OK" && status != "ZERO_RESULTS") {
                 return@withContext Result.failure(
@@ -103,6 +115,7 @@ class PlacesAutocompleteRepository {
 
             val conn = URL(endpoint).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
+            conn.addAndroidKeyHeaders()
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
 

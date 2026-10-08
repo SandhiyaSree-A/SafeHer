@@ -501,6 +501,12 @@ fun RouteCardItem(
     val normPedestrian = if (route.pedestrianScore > 1.0) route.pedestrianScore / 100.0 else route.pedestrianScore
     val pedestrianScoreOutOf20 = (normPedestrian * 20.0).coerceIn(0.0, 20.0)
 
+    // SOS hotspot — null means data not available (OSRM / local fallback)
+    val sosScoreOutOf15: Double? = route.sosHotspotScore?.let { raw ->
+        val norm = if (raw > 1.0) raw / 100.0 else raw
+        (norm * 15.0).coerceIn(0.0, 15.0)
+    }
+
     val normComposite = if (route.compositeScore <= 1.0 && route.compositeScore > 0.0) route.compositeScore * 100.0 else route.compositeScore
     val displayCompositeScore = normComposite.coerceIn(0.0, 100.0)
 
@@ -618,6 +624,64 @@ fun RouteCardItem(
                         Text("🚗 Traffic: ${ "%.1f".format(trafficScoreOutOf15) }/15", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         Text("🚶 Pedestrian: ${ "%.1f".format(pedestrianScoreOutOf20) }/20", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                         Text("🔍 Confidence: ${ "%.1f".format(displayConfidence) }%", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    // SOS Hotspot row
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (sosScoreOutOf15 != null) {
+                            Text(
+                                text = "🚨 SOS Safety: ${ "%.1f".format(sosScoreOutOf15) }/15",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (sosScoreOutOf15 < 8.0) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurface
+                            )
+                        } else {
+                            Text(
+                                text = "🚨 SOS Safety: N/A",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                        Text(
+                            text = "SOS hotspots on route: ${route.sosHotspotCount}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (route.sosHotspotCount > 0) Color(0xFFD32F2F) else MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+            }
+
+            // Warning chip when one or more SOS hotspots are on this route
+            if (route.sosHotspotCount >= 1) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    color = Color(0xFFD32F2F).copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFD32F2F),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Frequent SOS reports near this route",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFD32F2F)
+                        )
                     }
                 }
             }

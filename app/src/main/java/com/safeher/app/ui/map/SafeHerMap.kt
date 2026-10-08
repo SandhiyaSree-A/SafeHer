@@ -18,7 +18,8 @@ enum class MarkerKind {
     DESTINATION,
     LIVE,
     LIVE_OFF_ROUTE,
-    DARK_SPOT
+    DARK_SPOT,
+    SOS_HOTSPOT
 }
 
 data class MapMarker(
@@ -36,19 +37,21 @@ private fun routeColor(index: Int): Color = when (index) {
 }
 
 private fun markerHue(kind: MarkerKind): Float = when (kind) {
-    MarkerKind.ORIGIN -> BitmapDescriptorFactory.HUE_AZURE
-    MarkerKind.DESTINATION -> BitmapDescriptorFactory.HUE_RED
-    MarkerKind.LIVE -> BitmapDescriptorFactory.HUE_GREEN
-    MarkerKind.LIVE_OFF_ROUTE -> BitmapDescriptorFactory.HUE_ORANGE
-    MarkerKind.DARK_SPOT -> BitmapDescriptorFactory.HUE_VIOLET
+    MarkerKind.ORIGIN          -> BitmapDescriptorFactory.HUE_AZURE
+    MarkerKind.DESTINATION     -> BitmapDescriptorFactory.HUE_RED
+    MarkerKind.LIVE            -> BitmapDescriptorFactory.HUE_GREEN
+    MarkerKind.LIVE_OFF_ROUTE  -> BitmapDescriptorFactory.HUE_ORANGE
+    MarkerKind.DARK_SPOT       -> BitmapDescriptorFactory.HUE_VIOLET
+    MarkerKind.SOS_HOTSPOT     -> BitmapDescriptorFactory.HUE_RED
 }
 
 private fun markerTitle(kind: MarkerKind): String = when (kind) {
-    MarkerKind.ORIGIN -> "Start"
-    MarkerKind.DESTINATION -> "Destination"
-    MarkerKind.LIVE -> "You are here"
+    MarkerKind.ORIGIN       -> "Start"
+    MarkerKind.DESTINATION  -> "Destination"
+    MarkerKind.LIVE         -> "You are here"
     MarkerKind.LIVE_OFF_ROUTE -> "⚠️ Off Route"
-    MarkerKind.DARK_SPOT -> "⚠️ Dark Spot"
+    MarkerKind.DARK_SPOT    -> "⚠️ Dark Spot"
+    MarkerKind.SOS_HOTSPOT  -> "🚨 SOS Hotspot"
 }
 
 /**
@@ -148,6 +151,19 @@ fun SafeHerMap(
                 width = if (isSelected) 16f else 9f,
                 clickable = true,
                 onClick = { onRouteClick(route.routeId) }
+            )
+        }
+
+        // SOS Hotspot circles — red translucent filled circles, one per hotspot
+        // Only shown for the currently selected (or first) route to avoid clutter
+        val activeRoute = routes.firstOrNull { it.routeId == selectedRouteId } ?: routes.firstOrNull()
+        activeRoute?.sosHotspots?.forEach { hotspot ->
+            Circle(
+                center = LatLng(hotspot.lat, hotspot.lng),
+                radius = 200.0,   // matches SEARCH_RADIUS_M in the scoring service
+                fillColor = Color(0x33D32F2F),   // red, 20% opacity
+                strokeColor = Color(0xCCD32F2F),  // red, 80% opacity
+                strokeWidth = 2f
             )
         }
 
