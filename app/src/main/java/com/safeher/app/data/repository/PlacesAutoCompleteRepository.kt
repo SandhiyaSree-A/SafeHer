@@ -1,13 +1,11 @@
 package com.safeher.app.data.repository
 
-import com.safeher.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.util.UUID
 
 data class PlaceSuggestion(
     val placeId: String,
@@ -22,25 +20,15 @@ data class PlaceDetails(
 )
 
 /**
- * Real place search using the Google Places API (Autocomplete + Place Details),
+ * Real place search using the Photon API,
  * returning exact points instead of Nominatim's coarser area-level matches.
  */
 class PlacesAutocompleteRepository {
 
-    // >>> PASTE YOUR SHA-1 HERE: 40 characters, UPPERCASE, NO colons <<<
-    private val androidCert = "C5BD3DF9CCDE8B4D1112E39D6B374CA3EB8BDD2F"
-
-    // Tells Google "this request comes from the SafeHer Android app"
-    private fun HttpURLConnection.addAndroidKeyHeaders() {
-        setRequestProperty("X-Android-Package", "com.safeher.app")
-        setRequestProperty("X-Android-Cert", androidCert)
-    }
-
-    // Groups requests from one typing session together for accurate Places billing.
-    private var sessionToken: String = UUID.randomUUID().toString()
+    private val placesCache = mutableMapOf<String, PlaceDetails>()
 
     fun newSession() {
-        sessionToken = UUID.randomUUID().toString()
+        // No longer needed for Photon, but kept for compatibility if used elsewhere
     }
 
     suspend fun autocomplete(
@@ -49,53 +37,62 @@ class PlacesAutocompleteRepository {
         biasLng: Double? = null
     ): Result<List<PlaceSuggestion>> = withContext(Dispatchers.IO) {
         try {
-            android.util.Log.d("PlacesAuto", "autocomplete called: $query")
-            val apiKey = BuildConfig.MAPS_API_KEY
             if (query.isBlank()) return@withContext Result.success(emptyList())
 
-            val locationBias = if (biasLat != null && biasLng != null) {
-                "&locationbias=circle:50000@$biasLat,$biasLng" // 50km bias radius
-            } else ""
+            val lat = biasLat ?: 13.0827
+            val lon = biasLng ?: 80.2707
 
-            val endpoint = "https://maps.googleapis.com/maps/api/place/autocomplete/json" +
-                    "?input=${URLEncoder.encode(query, "UTF-8")}" +
-                    "&sessiontoken=$sessionToken" +
-                    locationBias +
-                    "&key=${URLEncoder.encode(apiKey, "UTF-8")}"
+            val endpoint = "https://photon.komoot.io/api?q=${URLEncoder.encode(query, "UTF-8")}" +
+                    "&lat=$lat&lon=$lon&limit=15&lang=en"
 
             val conn = URL(endpoint).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.addAndroidKeyHeaders()
+            conn.setRequestProperty("User-Agent", "SafeHer")
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
 
             if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-                return@withContext Result.failure(Exception("Places Autocomplete HTTP ${conn.responseCode}"))
+                return@withContext Result.failure(Exception("Photon API HTTP ${conn.responseCode}"))
             }
 
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(responseText)
-            android.util.Log.d("PlacesAuto", responseText)
-            val status = json.optString("status")
-            if (status != "OK" && status != "ZERO_RESULTS") {
-                return@withContext Result.failure(
-                    Exception("Places Autocomplete status: $status (${json.optString("error_message")})")
-                )
-            }
-
-            val predictions = json.optJSONArray("predictions")
+            val features = json.optJSONArray("features")
             val results = mutableListOf<PlaceSuggestion>()
-            if (predictions != null) {
-                for (i in 0 until predictions.length()) {
-                    val p = predictions.getJSONObject(i)
-                    val structured = p.optJSONObject("structured_formatting")
-                    results.add(
-                        PlaceSuggestion(
-                            placeId = p.getString("place_id"),
-                            primaryText = structured?.optString("main_text") ?: p.optString("description"),
-                            secondaryText = structured?.optString("secondary_text") ?: ""
-                        )
-                    )
+            
+            if (features != null) {
+                for (i in 0 until features.length()) {
+                    val f = features.getJSONObject(i)
+                    val properties = f.optJSONObject("properties") ?: continue
+                    
+                    if (properties.optString("countrycode") != "IN") continue
+                    
+                    val osmType = properties.optString("osm_type")
+                    val osmId = properties.optLong("osm_id", -1L)
+                    if (osmType.isEmpty() || osmId == -1L) continue
+                    
+                    val placeId = "$osmType$osmId"
+                    
+                    val name = properties.optString("name").takeIf { it.isNotBlank() }
+                    val street = properties.optString("street").takeIf { it.isNotBlank() }
+                    val district = properties.optString("district").takeIf { it.isNotBlank() }
+                    val city = properties.optString("city").takeIf { it.isNotBlank() }
+                    val state = properties.optString("state").takeIf { it.isNotBlank() }
+                    
+                    val primaryText = name ?: street ?: "Unknown Place"
+                    val secondaryList = listOfNotNull(street, district, city, state)
+                    val secondaryText = secondaryList.joinToString(", ")
+                    
+                    val geometry = f.optJSONObject("geometry")
+                    val coordinates = geometry?.optJSONArray("coordinates")
+                    if (coordinates != null && coordinates.length() >= 2) {
+                        val lng = coordinates.getDouble(0)
+                        val plat = coordinates.getDouble(1)
+                        placesCache[placeId] = PlaceDetails(plat, lng, "$primaryText, $secondaryText".trim(',', ' '))
+                    }
+
+                    results.add(PlaceSuggestion(placeId, primaryText, secondaryText))
+                    if (results.size >= 5) break // Limit to 5 after filtering
                 }
             }
             Result.success(results)
@@ -105,46 +102,11 @@ class PlacesAutocompleteRepository {
     }
 
     suspend fun getPlaceDetails(placeId: String): Result<PlaceDetails> = withContext(Dispatchers.IO) {
-        try {
-            val apiKey = BuildConfig.MAPS_API_KEY
-            val endpoint = "https://maps.googleapis.com/maps/api/place/details/json" +
-                    "?place_id=${URLEncoder.encode(placeId, "UTF-8")}" +
-                    "&fields=geometry,formatted_address" +
-                    "&sessiontoken=$sessionToken" +
-                    "&key=${URLEncoder.encode(apiKey, "UTF-8")}"
-
-            val conn = URL(endpoint).openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.addAndroidKeyHeaders()
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-
-            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-                return@withContext Result.failure(Exception("Place Details HTTP ${conn.responseCode}"))
-            }
-
-            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(responseText)
-            if (json.optString("status") != "OK") {
-                return@withContext Result.failure(Exception("Place Details status: ${json.optString("status")}"))
-            }
-
-            val result = json.getJSONObject("result")
-            val location = result.getJSONObject("geometry").getJSONObject("location")
-
-            // A fresh session token should be used for the next autocomplete session
-            // (Google's billing model groups one search session as a single unit).
-            sessionToken = UUID.randomUUID().toString()
-
-            Result.success(
-                PlaceDetails(
-                    lat = location.getDouble("lat"),
-                    lng = location.getDouble("lng"),
-                    formattedAddress = result.optString("formatted_address")
-                )
-            )
-        } catch (e: Exception) {
-            Result.failure(e)
+        val details = placesCache[placeId]
+        if (details != null) {
+            Result.success(details)
+        } else {
+            Result.failure(Exception("Place details not found in cache for $placeId"))
         }
     }
 }

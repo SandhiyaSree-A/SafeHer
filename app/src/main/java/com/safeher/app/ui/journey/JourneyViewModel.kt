@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import com.safeher.app.data.repository.PlacesAutocompleteRepository
 import com.safeher.app.data.repository.PlaceSuggestion
@@ -67,13 +69,17 @@ class JourneyViewModel(
         _uiState.update { it.copy(searchQuery = query) }
     }
 
-        fun onSearchTextChanged(query: String) {
+    private var searchJob: Job? = null
+
+    fun onSearchTextChanged(query: String) {
         updateSearchQuery(query)
         if (query.length < 3) {
             _placeSuggestions.value = emptyList()
             return
         }
-        viewModelScope.launch {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(300)
             placesRepository.autocomplete(
                 query = query,
                 biasLat = _uiState.value.originLat.takeIf { it != 0.0 },
@@ -159,6 +165,14 @@ class JourneyViewModel(
         if (targetQuery.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Please enter a destination name or address.") }
             return
+        }
+
+        if (query == null) {
+            val firstSuggestion = _placeSuggestions.value.firstOrNull()
+            if (firstSuggestion != null) {
+                onPlaceSelected(firstSuggestion.placeId, firstSuggestion.primaryText)
+                return
+            }
         }
 
         viewModelScope.launch {

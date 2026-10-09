@@ -201,7 +201,12 @@ fun JourneyTabContent(
 
 
                     // Place Autocomplete Search Field
-                    val suggestionsExpanded = placeSuggestions.isNotEmpty()
+                    val isOffline = remember(searchInput) {
+                        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                        val actNw = cm.getNetworkCapabilities(cm.activeNetwork)
+                        actNw == null || !actNw.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    }
+                    val suggestionsExpanded = placeSuggestions.isNotEmpty() || (searchInput.length >= 3 && isOffline)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top
@@ -240,41 +245,58 @@ fun JourneyTabContent(
                                     expanded = true,
                                     onDismissRequest = { /* keep open while typing */ }
                                 ) {
-                                    placeSuggestions.forEach { suggestion ->
+                                    if (isOffline && searchInput.length >= 3) {
                                         DropdownMenuItem(
-                                            text = {
-                                                Column {
-                                                    Text(
-                                                        text = suggestion.primaryText,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        fontSize = 13.sp
-                                                    )
-                                                    if (suggestion.secondaryText.isNotBlank()) {
-                                                        Text(
-                                                            text = suggestion.secondaryText,
-                                                            fontSize = 11.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.Default.Place,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            },
-                                            onClick = {
-                                                searchInput = suggestion.primaryText
-                                                viewModel.onPlaceSelected(
-                                                    placeId = suggestion.placeId,
-                                                    displayText = suggestion.primaryText
-                                                )
-                                            }
+                                            text = { Text("You're offline - search needs internet", color = MaterialTheme.colorScheme.error) },
+                                            onClick = {}
                                         )
+                                    } else {
+                                        placeSuggestions.forEach { suggestion ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Column {
+                                                        Text(
+                                                            text = suggestion.primaryText,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.sp
+                                                        )
+                                                        if (suggestion.secondaryText.isNotBlank()) {
+                                                            Text(
+                                                                text = suggestion.secondaryText,
+                                                                fontSize = 11.sp,
+                                                                color = Color.Gray
+                                                            )
+                                                        }
+                                                    }
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        Icons.Default.LocationOn,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                },
+                                                onClick = {
+                                                    searchInput = suggestion.primaryText
+                                                    viewModel.onPlaceSelected(
+                                                        placeId = suggestion.placeId,
+                                                        displayText = suggestion.primaryText
+                                                    )
+                                                }
+                                            )
+                                        }
                                     }
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = "© OpenStreetMap contributors",
+                                                fontSize = 10.sp,
+                                                color = Color.Gray
+                                            )
+                                        },
+                                        onClick = {}
+                                    )
                                 }
                             }
                         }

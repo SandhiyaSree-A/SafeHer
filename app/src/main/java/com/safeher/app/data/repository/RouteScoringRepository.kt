@@ -41,20 +41,19 @@ class RouteScoringRepository {
         transportMode: String = "driving"
     ): Result<List<RouteOption>> = withContext(Dispatchers.IO) {
         try {
-            // STEP 1: Geocode destination query or use fallback coordinates
             val (destLat, destLng) = try {
                 if (destinationQuery.isNotBlank()) {
                     geocodeDestination(destinationQuery)
                 } else if (destLatFallback != 0.0 && destLngFallback != 0.0) {
                     Pair(destLatFallback, destLngFallback)
                 } else {
-                    Pair(13.1500, 80.2000) // Default Puzhal, Chennai coordinates if query empty
+                    throw Exception("Couldn't find that place")
                 }
             } catch (e: Exception) {
                 if (destLatFallback != 0.0 && destLngFallback != 0.0) {
                     Pair(destLatFallback, destLngFallback)
                 } else {
-                    Pair(13.1500, 80.2000)
+                    throw Exception("Couldn't find that place")
                 }
             }
 
@@ -348,25 +347,32 @@ class RouteScoringRepository {
     private fun geocodeDestination(query: String): Pair<Double, Double> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         
-        // 1. Try local backend geocoder
+        // 1. Try Photon API directly
         try {
-            val endpointUrl = "http://10.0.2.2:8000/geocode?query=$encodedQuery"
-            val url = URL(endpointUrl)
+            val url = URL("https://photon.komoot.io/api?q=$encodedQuery&limit=1&lang=en")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "SafeHer")
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
             if (conn.responseCode == HttpURLConnection.HTTP_OK) {
                 val responseText = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(responseText)
-                return Pair(json.getDouble("latitude"), json.getDouble("longitude"))
+                val features = json.optJSONArray("features")
+                if (features != null && features.length() > 0) {
+                    val f = features.getJSONObject(0)
+                    val coords = f.optJSONObject("geometry")?.optJSONArray("coordinates")
+                    if (coords != null && coords.length() >= 2) {
+                        return Pair(coords.getDouble(1), coords.getDouble(0))
+                    }
+                }
             }
         } catch (e: Exception) {
-            // Ignore backend error and try direct Nominatim
+            // Ignore error and try fallback
         }
 
         // 2. Direct Nominatim OpenStreetMap fallback
-        val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=jsonv2&limit=1")
+        val url = URL("https://nominatim.openstreetmap.org/search?q=$encodedQuery&countrycodes=in&format=jsonv2&limit=1")
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "GET"
         conn.setRequestProperty("User-Agent", "SafeHer-App/1.0")
@@ -381,7 +387,7 @@ class RouteScoringRepository {
                 return Pair(obj.getDouble("lat"), obj.getDouble("lon"))
             }
         }
-        throw Exception("Destination search returned no results")
+        throw Exception("Couldn't find that place")
     }
 
     suspend fun saveSelectedJourney(
