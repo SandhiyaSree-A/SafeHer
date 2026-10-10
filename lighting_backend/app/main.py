@@ -2,7 +2,9 @@ import os
 import hashlib
 import hmac
 import logging
+import uuid
 import requests
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -68,6 +70,11 @@ class RouteRequest(BaseModel):
     destination_lon: float
 
     mode: str = "driving"  # driving | walking | bicycling
+
+    # Optional fields for trust score persistence
+    user_id: str = ""
+    session_id: str = ""
+    destination_address: str = ""
 
 class SosEventRequest(BaseModel):
     alertId: str
@@ -355,6 +362,10 @@ def analyze_route(request: RouteRequest):
                 "confidence_score":       confidence,
                 "composite_score":        composite,
 
+                # Dark stretch stats (for trust score persistence)
+                "dark_points":    route_lighting.get("dark_stretch_analysis", {}).get("total_dark_points", 0),
+                "dark_stretches": route_lighting.get("dark_stretch_analysis", {}).get("total_dark_stretches", 0),
+
                 # SOS Hotspot factor (None when Firestore unavailable)
                 "sos_hotspot_score":  sos_hotspot_score_val,
                 "sos_hotspot_count":  route.get("sos_hotspot_count", 0),
@@ -370,6 +381,134 @@ def analyze_route(request: RouteRequest):
                     "not a guarantee of real-world safety or crime prediction"
                 ),
             })
+
+        # ----------------------------------
+        # PERSIST TRUST SCORES TO DATABASE
+        # ----------------------------------
+
+        pool = get_pg_pool()
+        historical_averages = {}  # route_id -> dict of avg scores
+
+        if pool:
+            try:
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+
+                        # ── 1. Fetch historical averages for this corridor ────────
+                        # Matches destination within ~500 m (0.005 degrees ≈ 500 m)
+                        cur.execute("""
+                            SELECT
+                                route_id,
+                                COUNT(*) AS history_count,
+                                AVG(lighting_safety_score)  AS avg_lighting_safety,
+                                AVG(average_light_score)    AS avg_light_score,
+                                AVG(traffic_score)          AS avg_traffic,
+                                AVG(human_presence_score)   AS avg_human_presence,
+                                AVG(activity_density_score) AS avg_activity_density,
+                                AVG(pedestrian_score)       AS avg_pedestrian,
+                                AVG(sos_hotspot_score)      AS avg_sos_hotspot,
+                                AVG(composite_score)        AS avg_composite,
+                                AVG(confidence)             AS avg_confidence
+                            FROM route_trust_scores
+                            WHERE
+                                ABS(dest_lat - %s) < 0.005
+                                AND ABS(dest_lng - %s) < 0.005
+                                AND transport_mode = %s
+                            GROUP BY route_id
+                        """, (
+                            request.destination_lat,
+                            request.destination_lon,
+                            request.mode
+                        ))
+
+                        for row in cur.fetchall():
+                            historical_averages[row[0]] = {
+                                "history_count":        row[1],
+                                "avg_lighting_safety":  row[2],
+                                "avg_light_score":      row[3],
+                                "avg_traffic":          row[4],
+                                "avg_human_presence":   row[5],
+                                "avg_activity_density": row[6],
+                                "avg_pedestrian":       row[7],
+                                "avg_sos_hotspot":      row[8],
+                                "avg_composite":        row[9],
+                                "avg_confidence":       row[10],
+                            }
+
+                        # ── 2. Insert fresh scores for every route in this call ──
+                        now = datetime.now(tz=timezone.utc)
+
+                        for r in all_routes:
+                            cur.execute("""
+                                INSERT INTO route_trust_scores (
+                                    id, route_id, user_id, session_id,
+                                    origin_lat, origin_lng,
+                                    dest_lat, dest_lng,
+                                    destination_address, transport_mode,
+                                    lighting_safety_score, average_light_score,
+                                    traffic_score, human_presence_score,
+                                    activity_density_score, pedestrian_score,
+                                    sos_hotspot_score, sos_hotspot_count,
+                                    confidence, composite_score,
+                                    distance_km, duration_minutes,
+                                    dark_points, dark_stretches,
+                                    computed_at
+                                ) VALUES (
+                                    %s, %s, %s, %s,
+                                    %s, %s, %s, %s, %s, %s,
+                                    %s, %s, %s, %s, %s, %s,
+                                    %s, %s, %s, %s,
+                                    %s, %s, %s, %s, %s
+                                )
+                                ON CONFLICT (id) DO NOTHING
+                            """, (
+                                str(uuid.uuid4()),
+                                r["route_id"],
+                                request.user_id or None,
+                                request.session_id or None,
+                                request.source_lat,
+                                request.source_lon,
+                                request.destination_lat,
+                                request.destination_lon,
+                                request.destination_address or None,
+                                request.mode,
+                                r.get("lighting_safety_score", 0.0),
+                                r.get("average_light_score", 0.0),
+                                r.get("traffic_score", 0.0),
+                                r.get("human_presence_score", 0.0),
+                                r.get("activity_density_score", 0.0),
+                                r.get("pedestrian_score", 0.0),
+                                r.get("sos_hotspot_score"),
+                                r.get("sos_hotspot_count", 0),
+                                r.get("confidence_score", 1.0),
+                                r.get("composite_score", 0.0),
+                                r.get("distance_km"),
+                                r.get("duration_minutes"),
+                                r.get("dark_points", 0),
+                                r.get("dark_stretches", 0),
+                                now
+                            ))
+
+                    conn.commit()
+            except Exception as db_err:
+                logger.warning("Trust score DB operation failed: %s", db_err)
+
+        # ── Attach historical context to each route in the response ───────────
+        for r in all_routes:
+            hist = historical_averages.get(r["route_id"])
+            if hist:
+                r["historical_trust"] = {
+                    "history_count":        hist["history_count"],
+                    "avg_composite_score":  round(hist["avg_composite"] or 0, 2),
+                    "avg_lighting_safety":  round(hist["avg_lighting_safety"] or 0, 2),
+                    "avg_traffic":          round(hist["avg_traffic"] or 0, 2),
+                    "avg_human_presence":   round(hist["avg_human_presence"] or 0, 2),
+                    "avg_pedestrian":       round(hist["avg_pedestrian"] or 0, 2),
+                    "avg_sos_hotspot":      round(hist["avg_sos_hotspot"] or 0, 2) if hist["avg_sos_hotspot"] is not None else None,
+                    "avg_confidence":       round(hist["avg_confidence"] or 1.0, 3),
+                }
+            else:
+                r["historical_trust"] = None  # no prior data for this route
 
         # ----------------------------------
         # FINAL API RESPONSE

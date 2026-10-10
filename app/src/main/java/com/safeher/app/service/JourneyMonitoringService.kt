@@ -207,6 +207,21 @@ class JourneyMonitoringService : Service() {
                 currentUserId?.let { uid -> offlineSync.writeLocationPing(uid, journeyId, lat, lng, timestamp) }
 
                 if (routePoints.isNotEmpty()) {
+                    // Check if destination is reached (within 60 meters of final route point)
+                    val destinationPoint = routePoints.lastOrNull()
+                    if (destinationPoint != null) {
+                        val distToDest = FloatArray(1)
+                        android.location.Location.distanceBetween(lat, lng, destinationPoint.latitude, destinationPoint.longitude, distToDest)
+                        if (distToDest[0] <= 60.0f) {
+                            Log.i("JourneyService", "Destination reached (${distToDest[0]}m). Completing journey navigation.")
+                            offlineSync.writeJourneyUpdate(journeyId, mapOf("status" to "completed", "endedAt" to timestamp))
+                            withContext(Dispatchers.Main) {
+                                stopMonitoringService()
+                            }
+                            return@launch
+                        }
+                    }
+
                     val isOnPath = PolyUtil.isLocationOnPath(currentLatLng, routePoints, true, 150.0)
 
                     if (isOnPath) {

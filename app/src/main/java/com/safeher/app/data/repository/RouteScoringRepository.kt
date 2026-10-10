@@ -4,6 +4,7 @@ import com.google.firebase.FirebaseApp
 import com.safeher.app.data.offline.OfflineSyncRepository
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.maps.android.PolyUtil
+import com.safeher.app.data.model.HistoricalTrustData
 import com.safeher.app.data.model.Journey
 import com.safeher.app.data.model.RouteOption
 import com.safeher.app.data.model.RoutePoint
@@ -105,7 +106,9 @@ class RouteScoringRepository {
         destLat: Double,
         destLng: Double,
         destinationQuery: String,
-        transportMode: String = "driving"
+        transportMode: String = "driving",
+        userId: String = "",
+        sessionId: String = ""
     ): List<RouteOption> {
         val endpointUrl = "http://10.0.2.2:8000/analyze-route"
         val url = URL(endpointUrl)
@@ -122,6 +125,10 @@ class RouteScoringRepository {
             put("destination_lat", destLat)
             put("destination_lon", destLng)
             put("mode", transportMode)
+            // Optional context fields for trust score persistence
+            put("user_id", userId)
+            put("session_id", sessionId)
+            put("destination_address", destinationQuery)
         }
 
         conn.outputStream.use { output ->
@@ -197,6 +204,22 @@ class RouteScoringRepository {
                 darkSpots.add(midPoint)
             }
 
+            // Parse historical trust data (if backend returned it)
+            val historicalTrust: HistoricalTrustData? = run {
+                val ht = route.optJSONObject("historical_trust") ?: return@run null
+                HistoricalTrustData(
+                    historyCount       = ht.optInt("history_count", 0),
+                    avgCompositeScore  = ht.optDouble("avg_composite_score", 0.0),
+                    avgLightingSafety  = ht.optDouble("avg_lighting_safety", 0.0),
+                    avgTraffic         = ht.optDouble("avg_traffic", 0.0),
+                    avgHumanPresence   = ht.optDouble("avg_human_presence", 0.0),
+                    avgPedestrian      = ht.optDouble("avg_pedestrian", 0.0),
+                    avgSosHotspot      = if (ht.has("avg_sos_hotspot") && !ht.isNull("avg_sos_hotspot"))
+                                            ht.getDouble("avg_sos_hotspot") else null,
+                    avgConfidence      = ht.optDouble("avg_confidence", 1.0)
+                )
+            }
+
             routes.add(
                 RouteOption(
                     routeId = "route_$routeId",
@@ -220,7 +243,8 @@ class RouteScoringRepository {
                     sosHotspotCount = sosHotspotCount,
                     sosHotspots = sosHotspots,
                     darkSpots = darkSpots,
-                    points = points
+                    points = points,
+                    historicalTrust = historicalTrust
                 )
             )
         }

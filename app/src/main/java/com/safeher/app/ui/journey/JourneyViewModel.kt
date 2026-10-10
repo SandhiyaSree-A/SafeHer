@@ -9,6 +9,11 @@ import com.safeher.app.data.model.Journey
 import com.safeher.app.data.model.RouteOption
 import com.safeher.app.data.model.RouteTurnStep
 import com.safeher.app.data.repository.RouteScoringRepository
+import com.safeher.app.data.repository.RouteRatingRepository
+import com.safeher.app.data.repository.UserPreferencesRepository
+import com.safeher.app.data.repository.PlacesAutocompleteRepository
+import com.safeher.app.data.repository.PlaceSuggestion
+import com.safeher.app.data.model.RouteFeedback
 import com.safeher.app.util.RouteCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,8 +24,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import com.safeher.app.data.repository.PlacesAutocompleteRepository
-import com.safeher.app.data.repository.PlaceSuggestion
 
 data class JourneyUiState(
     val searchQuery: String = "",
@@ -42,11 +45,19 @@ data class JourneyUiState(
     val currentPingLat: Double = 0.0,
     val currentPingLng: Double = 0.0,
     val isDeviated: Boolean = false,
-    val showDeviationDialog: Boolean = false
+    val showDeviationDialog: Boolean = false,
+    val showRatingDialog: Boolean = false,
+    val lastCompletedJourney: Journey? = null,
+    val lastCompletedRoute: RouteOption? = null,
+    val savedHomeAddress: String? = null,
+    val ratingFeedbackSummary: String? = null,
+    val isOfflineVerifiedRoute: Boolean = false
 )
 
 class JourneyViewModel(
-    private val repository: RouteScoringRepository = RouteScoringRepository()
+    private val repository: RouteScoringRepository = RouteScoringRepository(),
+    private val ratingRepository: RouteRatingRepository = RouteRatingRepository(),
+    private val userPrefsRepository: UserPreferencesRepository = UserPreferencesRepository()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(JourneyUiState())
@@ -58,6 +69,18 @@ class JourneyViewModel(
 
     private val _placeSuggestions = MutableStateFlow<List<PlaceSuggestion>>(emptyList())
     val placeSuggestions: StateFlow<List<PlaceSuggestion>> = _placeSuggestions.asStateFlow()
+
+    fun loadHomeAddress(userId: String) {
+        val home = userPrefsRepository.getHomeAddress(userId)
+        _uiState.update { it.copy(savedHomeAddress = home) }
+    }
+
+    fun saveHomeAddress(userId: String, address: String) {
+        viewModelScope.launch {
+            userPrefsRepository.saveHomeAddress(userId, address)
+            _uiState.update { it.copy(savedHomeAddress = address.trim()) }
+        }
+    }
 
     fun updateCurrentLocation(lat: Double, lng: Double) {
         if (lat != 0.0 && lng != 0.0) {
@@ -89,12 +112,12 @@ class JourneyViewModel(
         }
     }
 
-    fun onPlaceSelected(placeId: String, displayText: String) {
+    fun onPlaceSelected(placeId: String, displayText: String, userId: String = "") {
         updateSearchQuery(displayText)
         _placeSuggestions.value = emptyList()
         viewModelScope.launch {
             placesRepository.getPlaceDetails(placeId).onSuccess { details ->
-                searchAndScoreRoutesAtCoordinates(details.lat, details.lng, details.formattedAddress)
+                searchAndScoreRoutesAtCoordinates(details.lat, details.lng, details.formattedAddress, userId)
             }.onFailure { err ->
                 _uiState.update {
                     it.copy(errorMessage = err.localizedMessage ?: "Failed to resolve place details")
@@ -103,7 +126,7 @@ class JourneyViewModel(
         }
     }
 
-    fun searchAndScoreRoutesAtCoordinates(lat: Double, lng: Double, address: String) {
+    fun searchAndScoreRoutesAtCoordinates(lat: Double, lng: Double, address: String, userId: String = "") {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -114,8 +137,32 @@ class JourneyViewModel(
                 )
             }
 
-            // destinationQuery left blank + fallback coords supplied
-            // => scoreDynamicRoutes skips geocoding entirely and uses this exact point.
+            // 1. Check if offline database already has a verified safest route for this destination
+            val offlineSavedRoute = ratingRepository.findOfflineSavedRoute(
+                userId = userId,
+                destinationQuery = address,
+                originLat = _uiState.value.originLat,
+                originLng = _uiState.value.originLng,
+                destLatFallback = lat,
+                destLngFallback = lng
+            )
+
+            if (offlineSavedRoute != null) {
+                val lastPoint = offlineSavedRoute.points.lastOrNull()
+                _uiState.update {
+                    it.copy(
+                        routes = listOf(offlineSavedRoute),
+                        selectedRoute = offlineSavedRoute,
+                        destLat = lastPoint?.lat ?: lat,
+                        destLng = lastPoint?.lng ?: lng,
+                        isLoading = false,
+                        isOfflineVerifiedRoute = true
+                    )
+                }
+                return@launch
+            }
+
+            // 2. destinationQuery left blank + fallback coords supplied => scoreDynamicRoutes
             val result = repository.scoreDynamicRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
@@ -135,7 +182,8 @@ class JourneyViewModel(
                             selectedRoute = firstRoute,
                             destLat = lastPoint?.lat ?: lat,
                             destLng = lastPoint?.lng ?: lng,
-                            isLoading = false
+                            isLoading = false,
+                            isOfflineVerifiedRoute = false
                         )
                     }
                 },
@@ -151,16 +199,16 @@ class JourneyViewModel(
         }
     }
 
-    fun setTransportMode(mode: String) {
+    fun setTransportMode(mode: String, userId: String = "") {
         if (_uiState.value.selectedTransportMode == mode) return
         _uiState.update { it.copy(selectedTransportMode = mode) }
         val target = _uiState.value.destinationAddress.ifBlank { _uiState.value.searchQuery }.trim()
         if (target.isNotBlank()) {
-            searchAndScoreRoutes(target)
+            searchAndScoreRoutes(userId = userId, query = target)
         }
     }
 
-    fun searchAndScoreRoutes(query: String? = null) {
+    fun searchAndScoreRoutes(userId: String = "", query: String? = null) {
         val targetQuery = (query ?: _uiState.value.searchQuery).trim()
         if (targetQuery.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Please enter a destination name or address.") }
@@ -170,7 +218,7 @@ class JourneyViewModel(
         if (query == null) {
             val firstSuggestion = _placeSuggestions.value.firstOrNull()
             if (firstSuggestion != null) {
-                onPlaceSelected(firstSuggestion.placeId, firstSuggestion.primaryText)
+                onPlaceSelected(firstSuggestion.placeId, firstSuggestion.primaryText, userId)
                 return
             }
         }
@@ -185,8 +233,32 @@ class JourneyViewModel(
                 ) 
             }
 
-            
+            // 1. FAST PATH: Check the offline database table for a pre-saved, verified safest route!
+            val offlineSavedRoute = ratingRepository.findOfflineSavedRoute(
+                userId = userId,
+                destinationQuery = targetQuery,
+                originLat = _uiState.value.originLat,
+                originLng = _uiState.value.originLng,
+                destLatFallback = _uiState.value.destLat,
+                destLngFallback = _uiState.value.destLng
+            )
 
+            if (offlineSavedRoute != null) {
+                val lastPoint = offlineSavedRoute.points.lastOrNull()
+                _uiState.update {
+                    it.copy(
+                        routes = listOf(offlineSavedRoute),
+                        selectedRoute = offlineSavedRoute,
+                        destLat = lastPoint?.lat ?: it.destLat,
+                        destLng = lastPoint?.lng ?: it.destLng,
+                        isLoading = false,
+                        isOfflineVerifiedRoute = true
+                    )
+                }
+                return@launch
+            }
+
+            // 2. Normal computation when no verified offline route exists yet
             val result = repository.scoreDynamicRoutes(
                 originLat = _uiState.value.originLat,
                 originLng = _uiState.value.originLng,
@@ -204,7 +276,8 @@ class JourneyViewModel(
                             selectedRoute = firstRoute,
                             destLat = lastPoint?.lat ?: it.destLat,
                             destLng = lastPoint?.lng ?: it.destLng,
-                            isLoading = false
+                            isLoading = false,
+                            isOfflineVerifiedRoute = false
                         )
                     }
                 },
@@ -301,14 +374,20 @@ class JourneyViewModel(
                 if (e != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
                 val journey = snapshot.toObject(Journey::class.java) ?: return@addSnapshotListener
                 
-                _uiState.update {
-                    it.copy(
-                        activeJourney = journey,
+                val wasActive = _uiState.value.isJourneyActive
+                val isNowCompleted = (journey.status == "completed")
+
+                _uiState.update { current ->
+                    current.copy(
+                        activeJourney = if (isNowCompleted) null else journey,
                         isJourneyActive = (journey.status == "active"),
                         currentPingLat = journey.currentLat,
                         currentPingLng = journey.currentLng,
                         isDeviated = journey.isDeviated,
-                        showDeviationDialog = journey.deviationAlertActive
+                        showDeviationDialog = journey.deviationAlertActive,
+                        showRatingDialog = if (wasActive && isNowCompleted) true else current.showRatingDialog,
+                        lastCompletedJourney = if (wasActive && isNowCompleted) journey else current.lastCompletedJourney,
+                        lastCompletedRoute = if (wasActive && isNowCompleted) current.selectedRoute else current.lastCompletedRoute
                     )
                 }
             }
@@ -322,19 +401,123 @@ class JourneyViewModel(
         }
     }
 
-    fun endJourney(context: Context) {
-        val journeyId = _uiState.value.savedJourneyId ?: return
+    fun checkDestinationArrival(context: Context, currentLat: Double, currentLng: Double) {
+        if (!_uiState.value.isJourneyActive) return
+        val destLat = _uiState.value.destLat
+        val destLng = _uiState.value.destLng
+        if (destLat == 0.0 || destLng == 0.0 || currentLat == 0.0 || currentLng == 0.0) return
+
+        val distanceMeters = FloatArray(1)
+        android.location.Location.distanceBetween(currentLat, currentLng, destLat, destLng, distanceMeters)
+        if (distanceMeters[0] <= 60.0f) {
+            onDestinationReached(context)
+        }
+    }
+
+    fun onDestinationReached(context: Context) {
+        val journeyId = _uiState.value.savedJourneyId ?: _uiState.value.activeJourney?.journeyId
+        val journeyToRate = _uiState.value.activeJourney
+        val routeToRate = _uiState.value.selectedRoute
+
         viewModelScope.launch {
-            repository.endJourney(journeyId, context)
+            if (journeyId != null) {
+                repository.endJourney(journeyId, context)
+            }
             _uiState.update {
                 it.copy(
                     isJourneyActive = false,
-                    savedJourneyId = null,
-                    activeJourney = null,
                     showDeviationDialog = false,
-                    isJourneySaved = false
+                    showRatingDialog = true,
+                    lastCompletedJourney = journeyToRate,
+                    lastCompletedRoute = routeToRate
                 )
             }
+        }
+    }
+
+    fun endJourney(context: Context) {
+        onDestinationReached(context)
+    }
+
+    fun submitSafeRating(userId: String) {
+        val state = _uiState.value
+        val journey = state.lastCompletedJourney ?: state.activeJourney
+        val route = state.lastCompletedRoute ?: state.selectedRoute
+
+        viewModelScope.launch {
+            val result = ratingRepository.recordSafeRating(
+                userId = userId,
+                route = route,
+                journey = journey,
+                originLat = journey?.originLat ?: state.originLat,
+                originLng = journey?.originLng ?: state.originLng,
+                destLat = journey?.destLat ?: state.destLat,
+                destLng = journey?.destLng ?: state.destLng,
+                destinationAddress = journey?.destinationAddress ?: state.destinationAddress,
+                transportMode = state.selectedTransportMode
+            )
+
+            result.fold(
+                onSuccess = { res ->
+                    val summary = if (res.isOfflineReady) {
+                        "🎉 Route verified as your Safest Route (${res.safeRatingCount} times)! This route has been saved to your offline database. Next time you navigate, it loads instantly without needing to compute again."
+                    } else {
+                        "Safe rating recorded (${res.safeRatingCount}/3)! Rate this route safe 3 times to permanently save it in the offline database for zero-computation navigation."
+                    }
+                    _uiState.update { it.copy(ratingFeedbackSummary = summary) }
+                },
+                onFailure = {
+                    _uiState.update {
+                        it.copy(ratingFeedbackSummary = "Thank you! Your safe route rating has been saved to the database.")
+                    }
+                }
+            )
+        }
+    }
+
+    fun submitUnsafeFeedback(userId: String, reasons: List<String>, customReason: String) {
+        val state = _uiState.value
+        val journey = state.lastCompletedJourney ?: state.activeJourney
+        val route = state.lastCompletedRoute ?: state.selectedRoute
+
+        val feedback = RouteFeedback(
+            journeyId = journey?.journeyId ?: state.savedJourneyId ?: "",
+            userId = userId,
+            routeId = route?.routeId ?: journey?.selectedRouteId ?: "route_${System.currentTimeMillis()}",
+            routeName = route?.name ?: journey?.selectedRouteName ?: "Navigation Route",
+            originLat = journey?.originLat ?: state.originLat,
+            originLng = journey?.originLng ?: state.originLng,
+            destLat = journey?.destLat ?: state.destLat,
+            destLng = journey?.destLng ?: state.destLng,
+            destinationAddress = journey?.destinationAddress ?: state.destinationAddress,
+            transportMode = state.selectedTransportMode,
+            wasSafe = false,
+            reasons = reasons,
+            customReason = customReason,
+            submittedAt = System.currentTimeMillis()
+        )
+
+        viewModelScope.launch {
+            ratingRepository.saveRouteFeedback(feedback)
+            _uiState.update {
+                it.copy(
+                    ratingFeedbackSummary = "Thank you for alerting us. Your feedback helps protect women across the community."
+                )
+            }
+        }
+    }
+
+    fun dismissRatingDialog() {
+        _uiState.update {
+            it.copy(
+                showRatingDialog = false,
+                ratingFeedbackSummary = null,
+                lastCompletedJourney = null,
+                lastCompletedRoute = null,
+                savedJourneyId = null,
+                activeJourney = null,
+                isJourneySaved = false
+            )
         }
     }
 
@@ -350,4 +533,3 @@ class JourneyViewModel(
         super.onCleared()
     }
 }
-

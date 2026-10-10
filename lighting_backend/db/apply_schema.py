@@ -25,13 +25,14 @@ def check_status(conn):
         else:
             print("[FAIL] PostGIS extension is NOT installed.")
 
-        # Check Table
-        cur.execute("SELECT tablename FROM pg_tables WHERE tablename = 'sos_events';")
-        tbl = cur.fetchone()
-        if tbl:
-            print("[OK] sos_events table exists.")
-        else:
-            print("[FAIL] sos_events table does NOT exist.")
+        # Check Tables
+        for table_name in ['sos_events', 'safest_routes', 'route_feedback', 'saved_offline_routes', 'route_trust_scores']:
+            cur.execute("SELECT tablename FROM pg_tables WHERE tablename = %s;", (table_name,))
+            tbl = cur.fetchone()
+            if tbl:
+                print(f"[OK] {table_name} table exists.")
+            else:
+                print(f"[FAIL] {table_name} table does NOT exist.")
 
         # Check View
         cur.execute("SELECT viewname FROM pg_views WHERE viewname = 'sos_hotspots';")

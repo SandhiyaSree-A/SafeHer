@@ -47,11 +47,23 @@ fun JourneyTabContent(
     LaunchedEffect(currentLocation) {
         currentLocation?.let { location ->
             viewModel.updateCurrentLocation(location.lat, location.lng)
+            viewModel.checkDestinationArrival(context, location.lat, location.lng)
         }
     }
 
     var searchInput by remember { mutableStateOf(uiState.searchQuery) }
     val placeSuggestions by viewModel.placeSuggestions.collectAsState()
+    var showSetHomeDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(user.uid) {
+        viewModel.loadHomeAddress(user.uid)
+    }
+
+    LaunchedEffect(uiState.destinationAddress) {
+        if (uiState.destinationAddress.isNotBlank()) {
+            searchInput = uiState.destinationAddress
+        }
+    }
 
     val trail = remember { mutableStateListOf<RoutePoint>() }
     LaunchedEffect(uiState.currentPingLat, uiState.currentPingLng, uiState.isJourneyActive) {
@@ -78,6 +90,46 @@ fun JourneyTabContent(
             onSendSos = {
                 viewModel.resolveDeviationAlert()
                 sosViewModel.triggerSos(context, user)
+            }
+        )
+    }
+
+    // Modal Set Home Address Dialog
+    if (showSetHomeDialog) {
+        SetHomeAddressDialog(
+            initialAddress = uiState.savedHomeAddress ?: "",
+            onDismiss = { showSetHomeDialog = false },
+            onSaveHome = { address ->
+                viewModel.saveHomeAddress(user.uid, address)
+                searchInput = address
+                viewModel.searchAndScoreRoutes(userId = user.uid, query = address)
+                showSetHomeDialog = false
+            }
+        )
+    }
+
+    // Modal Route Rating & Safety Feedback Popup Dialog
+    if (uiState.showRatingDialog) {
+        val destName = uiState.lastCompletedJourney?.destinationAddress
+            ?.ifBlank { uiState.destinationAddress }
+            ?: uiState.destinationAddress.ifBlank { "Destination" }
+        val routeName = uiState.lastCompletedRoute?.name
+            ?: uiState.lastCompletedJourney?.selectedRouteName
+            ?: uiState.selectedRoute?.name
+            ?: ""
+
+        RouteRatingDialog(
+            destinationName = destName,
+            routeName = routeName,
+            feedbackSummary = uiState.ratingFeedbackSummary,
+            onSafeClicked = {
+                viewModel.submitSafeRating(user.uid)
+            },
+            onUnsafeSubmit = { reasons, customReason ->
+                viewModel.submitUnsafeFeedback(user.uid, reasons, customReason)
+            },
+            onDismiss = {
+                viewModel.dismissRatingDialog()
             }
         )
     }
@@ -162,22 +214,36 @@ fun JourneyTabContent(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         OutlinedButton(
                             onClick = { viewModel.simulateOffPathDeviation() },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                             border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(Color.White)),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                         ) {
-                            Text("Simulate Deviation", fontSize = 12.sp)
+                            Text("Deviation", fontSize = 11.sp)
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { viewModel.onDestinationReached(context) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            modifier = Modifier.weight(1.3f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("Arrived 🏁", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                         Button(
                             onClick = { viewModel.endJourney(context) },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
                         ) {
-                            Text("End Journey", fontSize = 12.sp)
+                            Text("End Journey", fontSize = 11.sp)
                         }
                     }
                 }
@@ -281,7 +347,8 @@ fun JourneyTabContent(
                                                     searchInput = suggestion.primaryText
                                                     viewModel.onPlaceSelected(
                                                         placeId = suggestion.placeId,
-                                                        displayText = suggestion.primaryText
+                                                        displayText = suggestion.primaryText,
+                                                        userId = user.uid
                                                     )
                                                 }
                                             )
@@ -301,16 +368,100 @@ fun JourneyTabContent(
                             }
                         }
 
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // HOME BUTTON: 1-Tap navigation to saved home address (asks once to set)
+                        FilledTonalIconButton(
+                            onClick = {
+                                if (uiState.savedHomeAddress.isNullOrBlank()) {
+                                    showSetHomeDialog = true
+                                } else {
+                                    val home = uiState.savedHomeAddress!!
+                                    searchInput = home
+                                    viewModel.searchAndScoreRoutes(userId = user.uid, query = home)
+                                }
+                            },
+                            modifier = Modifier
+                                .size(56.dp)
+                                .align(Alignment.CenterVertically),
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = if (!uiState.savedHomeAddress.isNullOrBlank()) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Home,
+                                contentDescription = "Home",
+                                tint = if (!uiState.savedHomeAddress.isNullOrBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
                         Button(
                             onClick = {
-                                viewModel.searchAndScoreRoutes(searchInput)
+                                viewModel.searchAndScoreRoutes(userId = user.uid, query = searchInput)
                             },
                             modifier = Modifier
                                 .height(56.dp)
                                 .align(Alignment.CenterVertically)
                         ) {
                             Text("Go")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // QUICK DESTINATION ROW WITH HOME CHIP
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Surface(
+                            onClick = {
+                                if (uiState.savedHomeAddress.isNullOrBlank()) {
+                                    showSetHomeDialog = true
+                                } else {
+                                    val home = uiState.savedHomeAddress!!
+                                    searchInput = home
+                                    viewModel.searchAndScoreRoutes(userId = user.uid, query = home)
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (!uiState.savedHomeAddress.isNullOrBlank()) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (!uiState.savedHomeAddress.isNullOrBlank()) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Home,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (!uiState.savedHomeAddress.isNullOrBlank()) "Home: ${uiState.savedHomeAddress}" else "Set Home Address 🏠 (1-Tap)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (!uiState.savedHomeAddress.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Home",
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier
+                                            .size(13.dp)
+                                            .clickable { showSetHomeDialog = true }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -325,21 +476,21 @@ fun JourneyTabContent(
                             label = "Car 🚗",
                             modeKey = "driving",
                             isSelected = (uiState.selectedTransportMode == "driving"),
-                            onClick = { viewModel.setTransportMode("driving") },
+                            onClick = { viewModel.setTransportMode("driving", user.uid) },
                             modifier = Modifier.weight(1f)
                         )
                         TransportModeChip(
                             label = "Walk 🚶",
                             modeKey = "walking",
                             isSelected = (uiState.selectedTransportMode == "walking"),
-                            onClick = { viewModel.setTransportMode("walking") },
+                            onClick = { viewModel.setTransportMode("walking", user.uid) },
                             modifier = Modifier.weight(1f)
                         )
                         TransportModeChip(
                             label = "Bike 🚲",
                             modeKey = "bicycling",
                             isSelected = (uiState.selectedTransportMode == "bicycling"),
-                            onClick = { viewModel.setTransportMode("bicycling") },
+                            onClick = { viewModel.setTransportMode("bicycling", user.uid) },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -411,6 +562,42 @@ fun JourneyTabContent(
                             )
                         }
                     } else {
+                        // Offline Verified Safest Route Banner
+                        if (uiState.isOfflineVerifiedRoute) {
+                            Surface(
+                                color = Color(0xFF1B5E20).copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = Color(0xFF2E7D32),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = "Offline Safest Route Active 🛡️",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF1B5E20)
+                                        )
+                                        Text(
+                                            text = "Loaded from your offline database. Zero computation needed.",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF2E7D32)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -740,3 +927,68 @@ fun RouteCardItem(
         }
     }
 }
+
+@Composable
+fun SetHomeAddressDialog(
+    initialAddress: String = "",
+    onDismiss: () -> Unit,
+    onSaveHome: (address: String) -> Unit
+) {
+    var addressInput by remember { mutableStateOf(initialAddress) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Home,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(36.dp)
+            )
+        },
+        title = {
+            Text(
+                text = "Save Your Home Address",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = "Please enter your home address once. SafeHer will save it securely so that anytime you want to navigate home, you can simply tap the Home button.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = addressInput,
+                    onValueChange = { addressInput = it },
+                    placeholder = { Text("e.g. 42 Park Avenue, Chennai") },
+                    label = { Text("Home Address") },
+                    leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (addressInput.trim().isNotBlank()) {
+                        onSaveHome(addressInput.trim())
+                    }
+                },
+                enabled = addressInput.trim().isNotBlank()
+            ) {
+                Text("Save & Go Home")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+

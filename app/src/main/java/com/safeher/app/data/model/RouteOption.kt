@@ -27,6 +27,21 @@ data class SafetiPinMetrics(
     val overallSafetyAuditScore: Double = 0.84
 )
 
+/**
+ * Historical averages from the route_trust_scores table for this corridor.
+ * Null when no prior data exists (first time the route is computed).
+ */
+data class HistoricalTrustData(
+    val historyCount: Int = 0,               // Number of past computations
+    val avgCompositeScore: Double = 0.0,     // Average overall safety score
+    val avgLightingSafety: Double = 0.0,     // Average lighting safety factor
+    val avgTraffic: Double = 0.0,            // Average traffic factor
+    val avgHumanPresence: Double = 0.0,      // Average human-presence factor
+    val avgPedestrian: Double = 0.0,         // Average pedestrian factor
+    val avgSosHotspot: Double? = null,       // Average SOS hotspot factor (null = never available)
+    val avgConfidence: Double = 1.0          // Average scoring confidence
+)
+
 data class RouteOption(
     val routeId: String = "",
     val name: String = "",
@@ -54,5 +69,7 @@ data class RouteOption(
     val turnSteps: List<RouteTurnStep> = emptyList(),
     val safetiPinMetrics: SafetiPinMetrics = SafetiPinMetrics(),
     val disclaimer: String = "Risk-awareness estimate for prototype/demo purposes only, not a guarantee of real-world safety or crime prediction",
-    val points: List<RoutePoint> = emptyList()
+    val points: List<RoutePoint> = emptyList(),
+    /** Historical DB-averaged trust scores for this corridor; null on first computation. */
+    val historicalTrust: HistoricalTrustData? = null
 )
