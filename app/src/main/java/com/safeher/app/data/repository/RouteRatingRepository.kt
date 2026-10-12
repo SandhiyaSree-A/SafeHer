@@ -291,6 +291,40 @@ class RouteRatingRepository(
                 Log.w("RouteRatingRepo", "Firestore safest_routes write deferred: ${e.message}")
             }
 
+            // 3. Sync to Supabase via backend endpoint
+            try {
+                val backendUrl = URL("http://10.0.2.2:8000/safest-routes")
+                val backendConn = backendUrl.openConnection() as java.net.HttpURLConnection
+                backendConn.requestMethod = "POST"
+                backendConn.doOutput = true
+                backendConn.setRequestProperty("Content-Type", "application/json")
+                backendConn.connectTimeout = 5000
+                backendConn.readTimeout = 5000
+
+                val backendJson = JSONObject().apply {
+                    put("id", effectiveRoute.id)
+                    put("journey_id", effectiveRoute.journeyId)
+                    put("user_id", effectiveRoute.userId)
+                    put("route_id", effectiveRoute.routeId)
+                    put("route_name", effectiveRoute.routeName)
+                    put("origin_lat", effectiveRoute.originLat)
+                    put("origin_lng", effectiveRoute.originLng)
+                    put("dest_lat", effectiveRoute.destLat)
+                    put("dest_lng", effectiveRoute.destLng)
+                    put("destination_address", effectiveRoute.destinationAddress)
+                    put("transport_mode", effectiveRoute.transportMode)
+                    put("composite_score", effectiveRoute.compositeScore)
+                    put("risk_label", effectiveRoute.riskLabel)
+                    put("distance", effectiveRoute.distance)
+                    put("duration", effectiveRoute.duration)
+                }
+                backendConn.outputStream.use { it.write(backendJson.toString().toByteArray()) }
+                backendConn.inputStream.bufferedReader().use { it.readText() }
+                backendConn.disconnect()
+            } catch (e: Exception) {
+                Log.w("RouteRatingRepo", "Backend safest-routes sync deferred: ${e.message}")
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e("RouteRatingRepo", "Error saving safest route: ${e.message}", e)
@@ -344,10 +378,37 @@ class RouteRatingRepository(
                 "createdAt" to effectiveFeedback.submittedAt
             )
 
+            // 3. Sync to Supabase via backend endpoint
             try {
-                firestore.collection("route_feedback").document(recordId).set(docData).await()
+                val backendUrl = URL("http://10.0.2.2:8000/route-feedback")
+                val backendConn = backendUrl.openConnection() as java.net.HttpURLConnection
+                backendConn.requestMethod = "POST"
+                backendConn.doOutput = true
+                backendConn.setRequestProperty("Content-Type", "application/json")
+                backendConn.connectTimeout = 5000
+                backendConn.readTimeout = 5000
+
+                val backendJson = JSONObject().apply {
+                    put("id", effectiveFeedback.id)
+                    put("journey_id", effectiveFeedback.journeyId)
+                    put("user_id", effectiveFeedback.userId)
+                    put("route_id", effectiveFeedback.routeId)
+                    put("route_name", effectiveFeedback.routeName)
+                    put("origin_lat", effectiveFeedback.originLat)
+                    put("origin_lng", effectiveFeedback.originLng)
+                    put("dest_lat", effectiveFeedback.destLat)
+                    put("dest_lng", effectiveFeedback.destLng)
+                    put("destination_address", effectiveFeedback.destinationAddress)
+                    put("transport_mode", effectiveFeedback.transportMode)
+                    put("was_safe", effectiveFeedback.wasSafe)
+                    put("reasons", effectiveFeedback.reasons.joinToString(";"))
+                    put("custom_reason", effectiveFeedback.customReason)
+                }
+                backendConn.outputStream.use { it.write(backendJson.toString().toByteArray()) }
+                backendConn.inputStream.bufferedReader().use { it.readText() }
+                backendConn.disconnect()
             } catch (e: Exception) {
-                Log.w("RouteRatingRepo", "Firestore route_feedback write deferred: ${e.message}")
+                Log.w("RouteRatingRepo", "Backend route-feedback sync deferred: ${e.message}")
             }
 
             Result.success(Unit)
