@@ -65,7 +65,7 @@ class OfflineSyncRepository private constructor(context: Context) {
     }
 
     private suspend fun postSosEventPg(alertId: String, alert: Map<String, Any?>) = withContext(Dispatchers.IO) {
-        val endpoint = "http://10.0.2.2:8000/sos-events"
+        val endpoint = "http://10.0.2.2:8080/sos-events"
         val location = alert["location"] as? Map<*, *>
         val lat = (location?.get("lat") as? Number)?.toDouble() ?: 0.0
         val lng = (location?.get("lng") as? Number)?.toDouble() ?: 0.0

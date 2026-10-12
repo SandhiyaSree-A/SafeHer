@@ -110,7 +110,7 @@ class RouteScoringRepository {
         userId: String = "",
         sessionId: String = ""
     ): List<RouteOption> {
-        val endpointUrl = "http://10.0.2.2:8000/analyze-route"
+        val endpointUrl = "http://10.0.2.2:8080/analyze-route"
         val url = URL(endpointUrl)
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
