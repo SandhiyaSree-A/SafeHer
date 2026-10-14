@@ -77,6 +77,14 @@ fun SafeHerNavGraph(
                 )
             }
         }
+
+        composable(Screen.TrafficChatbot.route) {
+            com.safeher.app.ui.chatbot.TrafficChatbotScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
         }
     }
 }

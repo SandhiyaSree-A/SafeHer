@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
@@ -17,10 +18,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.safeher.app.ui.chatbot.TrafficChatbotScreen
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import com.safeher.app.R
 import com.safeher.app.data.model.User
@@ -36,6 +40,7 @@ import com.safeher.app.ui.sos.SosViewModel
 enum class UserHomeTab(val title: String, val icon: ImageVector) {
     HOME("Home", Icons.Default.Home),
     JOURNEY("Journey", Icons.Default.Map),
+    TRAFFIC("SHEVA", Icons.Default.Chat),
     PROFILE("Profile", Icons.Default.Person)
 }
 
@@ -150,6 +155,9 @@ fun UserHomeScreen(
                                 sosViewModel = sosViewModel
                             )
                         }
+                        UserHomeTab.TRAFFIC -> {
+                            TrafficChatbotScreen()
+                        }
                         UserHomeTab.PROFILE -> {
                             Column(
                                 modifier = Modifier
@@ -208,14 +216,23 @@ fun UserHomeScreen(
                 }
             }
 
-            // Always-Accessible Prominent SOS Floating Action Button
-            SosFloatingButton(
-                user = user,
-                viewModel = sosViewModel,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(20.dp)
-            )
+            // Always-Accessible Prominent SOS Floating Action Button (except in Chatbot tab to keep keyboard/input unobstructed)
+            if (selectedTab != UserHomeTab.TRAFFIC) {
+                SosFloatingButton(
+                    user = user,
+                    viewModel = sosViewModel,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 20.dp, end = 20.dp)
+                )
+
+                // TryHackMe-style Floating Side-Popup Chatbot Mascot
+                com.safeher.app.ui.chatbot.FloatingTryHackMeChatbot(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 100.dp, end = 20.dp)
+                )
+            }
 
             if (showEditProfileDialog) {
                 EditProfileDialog(
@@ -298,3 +315,4 @@ private fun EditProfileDialog(
         }
     )
 }
+
