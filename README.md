@@ -1,4 +1,4 @@
-﻿# SafeHer 🛡️
+# SafeHer 🛡️
 
 > **A women's safety navigation app that recommends the safest routes using real-time lighting, crowd density, traffic, pedestrian data, and SOS hotspot intelligence.**
 
