@@ -198,6 +198,10 @@ fun UserHomeScreen(
                                 )
 
                                 Spacer(modifier = Modifier.height(16.dp))
+
+                                com.safeher.app.ui.profile.EmergencyHelplineDirectorySection()
+
+                                Spacer(modifier = Modifier.height(16.dp))
                                 com.safeher.app.ui.map.OfflineMapCard()
                                 Spacer(modifier = Modifier.height(16.dp))
 

@@ -1,4 +1,4 @@
-﻿package com.safeher.app.ui.chatbot
+package com.safeher.app.ui.chatbot
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -37,13 +37,9 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         val welcomeMessage = ChatMessage(
             id = "welcome",
             isUser = false,
-            text = "Hello! I am SHEVA, your Indian Traffic & Road Safety Assistant. Ask me anything about traffic signs, penalties, helmet rules, or emergency accident help.",
+            text = "Hi! I'm SHEVA 💗\nHow can I help you today?",
             timestamp = getCurrentTime(),
-            quickReplies = listOf(
-                "🚦 Explain Traffic Signs",
-                "⛑️ Helmet Regulations",
-                "🚑 Road Accident Help"
-            )
+            quickReplies = emptyList()
         )
         _messages.value = listOf(welcomeMessage)
     }

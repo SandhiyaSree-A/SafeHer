@@ -314,7 +314,7 @@ fun SafeHerChatPanel(
                     Column {
                         Text(
                             text = "SHEVA",
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = NavyBlueTitle
                         )
@@ -322,19 +322,19 @@ fun SafeHerChatPanel(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isOnline) OnlineGreen else OfflineOrange)
-                            )
                             Text(
-                                text = if (isOnline) "Online" else "Offline Mode",
+                                text = "🟢 Online",
                                 fontSize = 11.sp,
-                                color = if (isOnline) Color(0xFF047857) else OfflineOrange,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF047857)
                             )
                         }
+                        Text(
+                            text = "Every Road, Her Right.",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = RosePinkAccent
+                        )
                     }
                 }
 
@@ -364,13 +364,6 @@ fun SafeHerChatPanel(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(top = 10.dp, bottom = 10.dp)
             ) {
-                // Welcome Hero with Mascot
-                if (messages.size <= 1) {
-                    item {
-                        MascotWelcomeHero()
-                    }
-                }
-
                 items(messages, key = { it.id }) { message ->
                     AnimatedMessageItem(message = message) { selectedReply ->
                         viewModel.sendMessage(selectedReply)
@@ -383,13 +376,6 @@ fun SafeHerChatPanel(
                     }
                 }
             }
-
-            // Smart Suggestion Chips
-            SmartSuggestionChipsRow(
-                onSuggestionClick = { suggestion ->
-                    viewModel.sendMessage(suggestion)
-                }
-            )
 
             HorizontalDivider(color = SoftPinkBorder, thickness = 1.dp)
 

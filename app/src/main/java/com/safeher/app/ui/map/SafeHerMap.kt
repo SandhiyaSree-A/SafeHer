@@ -148,7 +148,7 @@ fun SafeHerMap(
             Polyline(
                 points = route.points.map { LatLng(it.lat, it.lng) },
                 color = routeColor(index),
-                width = if (isSelected) 16f else 9f,
+                width = if (isSelected) 24f else 15f,
                 clickable = true,
                 onClick = { onRouteClick(route.routeId) }
             )

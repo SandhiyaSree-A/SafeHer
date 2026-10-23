@@ -5,6 +5,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -511,7 +513,7 @@ fun JourneyTabContent(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1.0f)
+                .weight(1.35f)
         ) {
             SafeHerMap(
                 modifier = Modifier.fillMaxSize(),
@@ -542,11 +544,18 @@ fun JourneyTabContent(
         // BOTTOM ROUTE SELECTION & SAFETIPIN METRICS (PLANNED MODE ONLY)
         if (!uiState.isJourneyActive) {
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1.0f),
                 color = MaterialTheme.colorScheme.background,
                 shadowElevation = 8.dp
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp)
+                ) {
 
                     if (uiState.routes.isEmpty()) {
                         Box(
@@ -598,13 +607,11 @@ fun JourneyTabContent(
                                 }
                             }
                         }
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 220.dp),
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            itemsIndexed(uiState.routes) { index, route ->
+                            uiState.routes.forEachIndexed { index, route ->
                                 RouteCardItem(
                                     route = route,
                                     index = index,
