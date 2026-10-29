@@ -192,6 +192,13 @@ fun UserHomeScreen(
 
                                 Spacer(modifier = Modifier.height(16.dp))
 
+                                // Set Home Address card (moved from Journey tab)
+                                com.safeher.app.ui.journey.HomeAddressProfileCard(
+                                    user = user
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
                                 EmergencyContactsSection(
                                     user = user,
                                     viewModel = profileViewModel

@@ -2,11 +2,11 @@ package com.safeher.app.ui.journey
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -258,16 +258,6 @@ fun JourneyTabContent(
                 shadowElevation = 4.dp
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "Plan Real-Time Safe Journey",
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-
                     // Place Autocomplete Search Field
                     val isOffline = remember(searchInput) {
                         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
@@ -412,89 +402,42 @@ fun JourneyTabContent(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // QUICK DESTINATION ROW WITH HOME CHIP
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Surface(
-                            onClick = {
-                                if (uiState.savedHomeAddress.isNullOrBlank()) {
-                                    showSetHomeDialog = true
-                                } else {
-                                    val home = uiState.savedHomeAddress!!
-                                    searchInput = home
-                                    viewModel.searchAndScoreRoutes(userId = user.uid, query = home)
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (!uiState.savedHomeAddress.isNullOrBlank()) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (!uiState.savedHomeAddress.isNullOrBlank()) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Home,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (!uiState.savedHomeAddress.isNullOrBlank()) "Home: ${uiState.savedHomeAddress}" else "Set Home Address 🏠 (1-Tap)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                if (!uiState.savedHomeAddress.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit Home",
-                                        tint = MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier
-                                            .size(13.dp)
-                                            .clickable { showSetHomeDialog = true }
-                                    )
-                                }
-                            }
-                        }
+                    // Transport Mode Dropdown
+                    var transportMenuExpanded by remember { mutableStateOf(false) }
+                    val transportLabel = when (uiState.selectedTransportMode) {
+                        "driving"   -> "🚗 Car"
+                        "walking"   -> "🚶 Walk"
+                        "bicycling" -> "🚲 Bike"
+                        else        -> "🚗 Car"
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Transport Mode Selector Chips (Drive, Walk, Bike)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        TransportModeChip(
-                            label = "Car 🚗",
-                            modeKey = "driving",
-                            isSelected = (uiState.selectedTransportMode == "driving"),
-                            onClick = { viewModel.setTransportMode("driving", user.uid) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        TransportModeChip(
-                            label = "Walk 🚶",
-                            modeKey = "walking",
-                            isSelected = (uiState.selectedTransportMode == "walking"),
-                            onClick = { viewModel.setTransportMode("walking", user.uid) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        TransportModeChip(
-                            label = "Bike 🚲",
-                            modeKey = "bicycling",
-                            isSelected = (uiState.selectedTransportMode == "bicycling"),
-                            onClick = { viewModel.setTransportMode("bicycling", user.uid) },
-                            modifier = Modifier.weight(1f)
-                        )
+                    Box {
+                        OutlinedButton(
+                            onClick = { transportMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.DirectionsCar, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Transport Mode: $transportLabel", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.weight(1f))
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = transportMenuExpanded,
+                            onDismissRequest = { transportMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("🚗 Car") },
+                                onClick = { viewModel.setTransportMode("driving", user.uid); transportMenuExpanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🚶 Walk") },
+                                onClick = { viewModel.setTransportMode("walking", user.uid); transportMenuExpanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🚲 Bike") },
+                                onClick = { viewModel.setTransportMode("bicycling", user.uid); transportMenuExpanded = false }
+                            )
+                        }
                     }
 
                     if (uiState.errorMessage != null) {
@@ -513,7 +456,7 @@ fun JourneyTabContent(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1.35f)
+                .weight(1.0f)
         ) {
             SafeHerMap(
                 modifier = Modifier.fillMaxSize(),
@@ -542,113 +485,140 @@ fun JourneyTabContent(
         }
 
         // BOTTOM ROUTE SELECTION & SAFETIPIN METRICS (PLANNED MODE ONLY)
+        // Expandable panel: collapsed shows a drag handle; scroll/drag up expands to full route details
         if (!uiState.isJourneyActive) {
+            var routePanelExpanded by remember(uiState.routes) { mutableStateOf(uiState.routes.isNotEmpty()) }
+            val collapsedHeight = 48.dp
+            val expandedHeight = if (uiState.routes.isEmpty()) collapsedHeight else 320.dp
+            val panelHeight by androidx.compose.animation.core.animateDpAsState(
+                targetValue = if (routePanelExpanded) expandedHeight else collapsedHeight,
+                animationSpec = androidx.compose.animation.core.tween(durationMillis = 300),
+                label = "panelHeight"
+            )
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1.0f),
+                    .height(panelHeight),
                 color = MaterialTheme.colorScheme.background,
-                shadowElevation = 8.dp
+                shadowElevation = 8.dp,
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(12.dp)
-                ) {
-
-                    if (uiState.routes.isEmpty()) {
+                Column {
+                    // Drag handle — tap or drag up to expand / tap to collapse
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(36.dp)
+                            .clickable { routePanelExpanded = !routePanelExpanded },
+                        contentAlignment = Alignment.Center
+                    ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(20.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Search a destination above for real-time safe route navigation.",
-                                color = MaterialTheme.colorScheme.outline,
-                                fontSize = 13.sp
-                            )
-                        }
-                    } else {
-                        // Offline Verified Safest Route Banner
-                        if (uiState.isOfflineVerifiedRoute) {
-                            Surface(
-                                color = Color(0xFF1B5E20).copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                .width(40.dp)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                        )
+                    }
+
+                    if (routePanelExpanded) {
+                        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                            if (uiState.routes.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(20.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = Color(0xFF2E7D32),
-                                        modifier = Modifier.size(18.dp)
+                                    Text(
+                                        text = "Search a destination above for real-time safe route navigation.",
+                                        color = MaterialTheme.colorScheme.outline,
+                                        fontSize = 13.sp
                                     )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            text = "Offline Safest Route Active 🛡️",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = Color(0xFF1B5E20)
-                                        )
-                                        Text(
-                                            text = "Loaded from your offline database. Zero computation needed.",
-                                            fontSize = 10.sp,
-                                            color = Color(0xFF2E7D32)
+                                }
+                            } else {
+                                // Offline Verified Safest Route Banner
+                                if (uiState.isOfflineVerifiedRoute) {
+                                    Surface(
+                                        color = Color(0xFF1B5E20).copy(alpha = 0.12f),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = Color(0xFF2E7D32),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Column {
+                                                Text(
+                                                    text = "Offline Safest Route Active 🛡️",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.sp,
+                                                    color = Color(0xFF1B5E20)
+                                                )
+                                                Text(
+                                                    text = "Loaded from your offline database. Zero computation needed.",
+                                                    fontSize = 10.sp,
+                                                    color = Color(0xFF2E7D32)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 220.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    itemsIndexed(uiState.routes) { index, route ->
+                                        RouteCardItem(
+                                            route = route,
+                                            index = index,
+                                            isSelected = (route.routeId == uiState.selectedRoute?.routeId),
+                                            onSelect = { viewModel.selectRoute(route) }
                                         )
                                     }
                                 }
-                            }
-                        }
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            uiState.routes.forEachIndexed { index, route ->
-                                RouteCardItem(
-                                    route = route,
-                                    index = index,
-                                    isSelected = (route.routeId == uiState.selectedRoute?.routeId),
-                                    onSelect = { viewModel.selectRoute(route) }
-                                )
-                            }
-                        }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                        if (!uiState.isJourneySaved) {
-                            Button(
-                                onClick = { viewModel.saveSelectedJourney(user.uid) },
-                                enabled = (uiState.selectedRoute != null && !uiState.isLoading),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Bookmark, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Select & Save Route (${uiState.selectedRoute?.displayRisk ?: ""})"
-                                )
-                            }
-                        } else {
-                            Button(
-                                onClick = { viewModel.startJourney(context, user.uid) },
-                                enabled = !uiState.isLoading,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Start Active Navigation",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                if (!uiState.isJourneySaved) {
+                                    Button(
+                                        onClick = { viewModel.saveSelectedJourney(user.uid) },
+                                        enabled = (uiState.selectedRoute != null && !uiState.isLoading),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Bookmark, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Select & Save Route (${uiState.selectedRoute?.displayRisk ?: ""})"
+                                        )
+                                    }
+                                } else {
+                                    Button(
+                                        onClick = { viewModel.startJourney(context, user.uid) },
+                                        enabled = !uiState.isLoading,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Start Active Navigation",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -999,3 +969,71 @@ fun SetHomeAddressDialog(
     )
 }
 
+/**
+ * Reusable card shown in the Profile tab to set/view the 1-tap home address.
+ * Delegates to JourneyViewModel for persistence so the Journey tab stays in sync.
+ */
+@Composable
+fun HomeAddressProfileCard(user: com.safeher.app.data.model.User) {
+    val viewModel: JourneyViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val uiState by viewModel.uiState.collectAsState()
+    var showDialog by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(user.uid) {
+        viewModel.loadHomeAddress(user.uid)
+    }
+
+    if (showDialog) {
+        SetHomeAddressDialog(
+            initialAddress = uiState.savedHomeAddress ?: "",
+            onDismiss = { showDialog = false },
+            onSaveHome = { address ->
+                viewModel.saveHomeAddress(user.uid, address)
+                showDialog = false
+            }
+        )
+    }
+
+    androidx.compose.material3.Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Icon(
+                    imageVector = Icons.Default.Home,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Home Address (1-Tap)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        text = if (!uiState.savedHomeAddress.isNullOrBlank())
+                            uiState.savedHomeAddress!!
+                        else
+                            "Tap to set your home address",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            IconButton(onClick = { showDialog = true }) {
+                Icon(
+                    imageVector = if (uiState.savedHomeAddress.isNullOrBlank()) Icons.Default.Add else Icons.Default.Edit,
+                    contentDescription = "Set Home"
+                )
+            }
+        }
+    }
+}
